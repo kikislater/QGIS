@@ -67,7 +67,7 @@ static bool isEndpointAtVertexIndex( const QgsGeometry &geom, int vertexIndex )
   {
     for ( int i = 0; i < multiCurve->numGeometries(); ++i )
     {
-      QgsCurve *part = qgsgeometry_cast<QgsCurve *>( multiCurve->geometryN( i ) );
+      const QgsCurve *part = multiCurve->curveN( i );
       Q_ASSERT( part );
       if ( vertexIndex < part->numPoints() )
         return vertexIndex == 0 || vertexIndex == part->numPoints() - 1;
@@ -97,7 +97,7 @@ int adjacentVertexIndexToEndpoint( const QgsGeometry &geom, int vertexIndex )
     int offset = 0;
     for ( int i = 0; i < multiCurve->numGeometries(); ++i )
     {
-      const QgsCurve *part = qgsgeometry_cast<const QgsCurve *>( multiCurve->geometryN( i ) );
+      const QgsCurve *part = multiCurve->curveN( i );
       Q_ASSERT( part );
       if ( vertexIndex < part->numPoints() )
         return vertexIndex == 0 ? offset + 1 : offset + part->numPoints() - 2;
@@ -797,7 +797,7 @@ QgsPointLocator::Match QgsVertexTool::snapToEditableLayer( QgsMapMouseEvent *e )
   config.setEnabled( true );
   config.setMode( QgsSnappingConfig::AdvancedConfiguration );
   config.setIntersectionSnapping( false );  // only snap to layers
-  config.individualLayerSettings().clear();
+  config.clearIndividualLayerSettings();
 
   typedef QHash<QgsVectorLayer *, QgsSnappingConfig::IndividualLayerSettings> SettingsHashMap;
   SettingsHashMap oldLayerSettings = oldConfig.individualLayerSettings();
@@ -2080,6 +2080,10 @@ void QgsVertexTool::moveVertex( const QgsPointXY &mapPoint, const QgsPointLocato
 
   QgsPoint layerPoint = matchToLayerPoint( dragLayer, mapPoint, mapPointMatch );
 
+  // needed to get Z value
+  if ( mapPointMatch && mapPointMatch->layer() && QgsWkbTypes::hasZ( mapPointMatch->layer()->wkbType() ) && ( mapPointMatch->hasEdge() || mapPointMatch->hasMiddleSegment() ) )
+    layerPoint = mapPointMatch->interpolatedPoint();
+
   QgsVertexId vid;
   if ( !geom.vertexIdFromVertexNr( dragVertexId, vid ) )
   {
@@ -2130,7 +2134,7 @@ void QgsVertexTool::moveVertex( const QgsPointXY &mapPoint, const QgsPointLocato
 
   applyEditsToLayers( edits );
 
-  if ( QgsProject::instance()->topologicalEditing() && mapPointMatch->hasEdge() && mapPointMatch->layer() )
+  if ( QgsProject::instance()->topologicalEditing() && ( mapPointMatch->hasEdge() || mapPointMatch->hasMiddleSegment() ) && mapPointMatch->layer() )
   {
     // topo editing: add vertex to existing segments when moving/adding a vertex to such segment.
     // this requires that the snapping match is to a segment and the segment layer's CRS

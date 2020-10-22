@@ -41,7 +41,9 @@ from qgis.core import (QgsGeometry,
                        QgsLineSymbolLayer,
                        QgsLineSymbol,
                        QgsUnitTypes,
-                       QgsMapUnitScale
+                       QgsMapUnitScale,
+                       QgsSymbolLayer,
+                       QgsProperty
                        )
 
 from qgis.testing import unittest, start_app
@@ -59,6 +61,20 @@ class TestQgsSimpleLineSymbolLayer(unittest.TestCase):
         report_file_path = "%s/qgistest.html" % QDir.tempPath()
         with open(report_file_path, 'a') as report_file:
             report_file.write(self.report)
+
+    def testDashPatternWithDataDefinedWidth(self):
+        # rendering test
+        s = QgsLineSymbol.createSimple({'outline_color': '#ff0000', 'outline_width': '2'})
+
+        s[0].setUseCustomDashPattern(True)
+        s[0].setPenCapStyle(Qt.FlatCap)
+        s[0].setCustomDashVector([3, 4, 5, 6])
+
+        s[0].dataDefinedProperties().setProperty(QgsSymbolLayer.PropertyStrokeWidth, QgsProperty.fromExpression('3'))
+
+        g = QgsGeometry.fromWkt('LineString(0 0, 10 0, 10 10, 0 10)')
+        rendered_image = self.renderGeometry(s, g)
+        assert self.imageCheck('simpleline_dashpattern_datadefined_width', 'simpleline_dashpattern_datadefined_width', rendered_image)
 
     def testDashPatternOffset(self):
 
@@ -120,6 +136,51 @@ class TestQgsSimpleLineSymbolLayer(unittest.TestCase):
         g = QgsGeometry.fromWkt('LineString(0 0, 10 0, 10 10, 0 10)')
         rendered_image = self.renderGeometry(s, g)
         assert self.imageCheck('simpleline_dashpattern_offset_custom', 'simpleline_dashpattern_offset_custom', rendered_image)
+
+    def testDashTweaks(self):
+        s = QgsLineSymbol.createSimple({'outline_color': '#ff0000', 'outline_width': '0.6'})
+
+        self.assertFalse(s.symbolLayer(0).alignDashPattern())
+        self.assertFalse(s.symbolLayer(0).tweakDashPatternOnCorners())
+
+        s.symbolLayer(0).setAlignDashPattern(True)
+        s.symbolLayer(0).setTweakDashPatternOnCorners(True)
+
+        s2 = s.clone()
+        self.assertTrue(s2.symbolLayer(0).alignDashPattern())
+        self.assertTrue(s2.symbolLayer(0).tweakDashPatternOnCorners())
+
+        doc = QDomDocument()
+        context = QgsReadWriteContext()
+        element = QgsSymbolLayerUtils.saveSymbol('test', s, doc, context)
+
+        s2 = QgsSymbolLayerUtils.loadSymbol(element, context)
+        self.assertTrue(s2.symbolLayer(0).alignDashPattern())
+        self.assertTrue(s2.symbolLayer(0).tweakDashPatternOnCorners())
+
+    def testAlignDashRender(self):
+        # rendering test
+        s = QgsLineSymbol.createSimple({'outline_color': '#ff0000', 'outline_width': '2'})
+
+        s.symbolLayer(0).setPenStyle(Qt.DashDotDotLine)
+        s.symbolLayer(0).setAlignDashPattern(True)
+
+        g = QgsGeometry.fromWkt('LineString(0 0, 9.2 0, 9.2 10, 1.3 10)')
+        rendered_image = self.renderGeometry(s, g)
+        assert self.imageCheck('simpleline_aligndashpattern', 'simpleline_aligndashpattern', rendered_image)
+
+    def testDashCornerTweakDashRender(self):
+        # rendering test
+        s = QgsLineSymbol.createSimple({'outline_color': '#ff0000', 'outline_width': '2'})
+
+        s.symbolLayer(0).setPenStyle(Qt.DashDotDotLine)
+        s.symbolLayer(0).setAlignDashPattern(True)
+        s.symbolLayer(0).setTweakDashPatternOnCorners(True)
+        s.symbolLayer(0).setPenJoinStyle(Qt.RoundJoin)
+
+        g = QgsGeometry.fromWkt('LineString(0 0, 2 1, 3 1, 10 0, 10 10, 5 5)')
+        rendered_image = self.renderGeometry(s, g)
+        assert self.imageCheck('simpleline_dashcornertweak', 'simpleline_dashcornertweak', rendered_image)
 
     def testRingFilter(self):
         # test filtering rings during rendering

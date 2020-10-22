@@ -238,7 +238,7 @@ QgsFeatureRenderer::Capabilities QgsPointDistanceRenderer::capabilities()
 {
   if ( !mRenderer )
   {
-    return nullptr;
+    return Capabilities();
   }
   return mRenderer->capabilities();
 }
@@ -428,7 +428,11 @@ void QgsPointDistanceRenderer::drawLabels( QPointF centerPoint, QgsSymbolRenderC
     currentLabelShift = *labelPosIt;
     if ( currentLabelShift.x() < 0 )
     {
+#if QT_VERSION < QT_VERSION_CHECK(5, 11, 0)
       currentLabelShift.setX( currentLabelShift.x() - fontMetrics.width( groupIt->label ) );
+#else
+      currentLabelShift.setX( currentLabelShift.x() - fontMetrics.horizontalAdvance( groupIt->label ) );
+#endif
     }
     if ( currentLabelShift.y() > 0 )
     {

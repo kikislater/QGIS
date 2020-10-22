@@ -115,11 +115,13 @@ class CORE_EXPORT QgsRasterDataProvider : public QgsDataProvider, public QgsRast
      * The \a uri argument gives a provider-specific uri indicating the underlying data
      * source and it's parameters.
      *
-     * The \a options argument specifies generic provider options.
+     * The \a options argument specifies generic provider options and since QGIS 3.16 creation flags are specified within the \a flags value.
      */
-    QgsRasterDataProvider( const QString &uri, const QgsDataProvider::ProviderOptions &providerOptions = QgsDataProvider::ProviderOptions() );
+    QgsRasterDataProvider( const QString &uri,
+                           const QgsDataProvider::ProviderOptions &providerOptions = QgsDataProvider::ProviderOptions(),
+                           QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags() );
 
-    QgsRasterInterface *clone() const override = 0;
+    QgsRasterDataProvider *clone() const override = 0;
 
     /**
      * Returns flags containing the supported capabilities of the data provider.
@@ -448,8 +450,9 @@ class CORE_EXPORT QgsRasterDataProvider : public QgsDataProvider, public QgsRast
      */
     virtual bool setEditable( bool enabled ) { Q_UNUSED( enabled ) return false; }
 
-    //! Writes into the provider datasource
     // TODO: add data type (may be different from band type)
+
+    //! Writes into the provider datasource
     virtual bool write( void *data, int band, int width, int height, int xOffset, int yOffset )
     {
       Q_UNUSED( data )
@@ -550,7 +553,7 @@ class CORE_EXPORT QgsRasterDataProvider : public QgsDataProvider, public QgsRast
     virtual QList< double > nativeResolutions() const;
 
     /**
-     * Returns true if the extents reported by the data provider are not reliable
+     * Returns TRUE if the extents reported by the data provider are not reliable
      * and it's possible that there is renderable content outside of these extents.
      *
      * \since QGIS 3.10.0
@@ -585,7 +588,7 @@ class CORE_EXPORT QgsRasterDataProvider : public QgsDataProvider, public QgsRast
     /**
      * Enable or disable provider-level resampling.
      *
-     * \return true if success
+     * \return TRUE if success
      * \since QGIS 3.16
      */
     virtual bool enableProviderResampling( bool enable ) { Q_UNUSED( enable ); return false; }
@@ -618,7 +621,7 @@ class CORE_EXPORT QgsRasterDataProvider : public QgsDataProvider, public QgsRast
     /**
      * Set resampling method to apply for zoomed-in operations.
      *
-     * \return true if success
+     * \return TRUE if success
      * \since QGIS 3.16
      */
     virtual bool setZoomedInResamplingMethod( ResamplingMethod method ) { Q_UNUSED( method ); return false; }
@@ -632,7 +635,7 @@ class CORE_EXPORT QgsRasterDataProvider : public QgsDataProvider, public QgsRast
     /**
      * Set resampling method to apply for zoomed-out operations.
      *
-     * \return true if success
+     * \return TRUE if success
      * \since QGIS 3.16
      */
     virtual bool setZoomedOutResamplingMethod( ResamplingMethod method ) { Q_UNUSED( method ); return false; }
@@ -646,7 +649,7 @@ class CORE_EXPORT QgsRasterDataProvider : public QgsDataProvider, public QgsRast
     /**
      * Sets maximum oversampling factor for zoomed-out operations.
      *
-     * \return true if success
+     * \return TRUE if success
      * \since QGIS 3.16
      */
     virtual bool setMaxOversampling( double factor ) { Q_UNUSED( factor ); return false; }

@@ -255,6 +255,8 @@ bool QgsFeatureAction::addFeature( const QgsAttributeMap &defaultAttributes, boo
     dialog->setAttribute( Qt::WA_DeleteOnClose );
     dialog->setMode( QgsAttributeEditorContext::AddFeatureMode );
     dialog->setEditCommandMessage( text() );
+    if ( scope )
+      dialog->setExtraContextScope( new QgsExpressionContextScope( *scope ) );
 
     connect( dialog->attributeForm(), &QgsAttributeForm::featureSaved, this, &QgsFeatureAction::onFeatureSaved );
 
@@ -310,6 +312,11 @@ void QgsFeatureAction::onFeatureSaved( const QgsFeature &feature )
       }
     }
   }
+}
+
+QgsFeature QgsFeatureAction::feature() const
+{
+  return mFeature ? *mFeature : QgsFeature();
 }
 
 QHash<QgsVectorLayer *, QgsAttributeMap> QgsFeatureAction::sLastUsedValues;

@@ -144,7 +144,7 @@
               </widget>
              </item>
              <item>
-              <widget class="QSpinBox" name="spinColorizeStrength">
+              <widget class="QgsSpinBox" name="spinColorizeStrength">
                <property name="suffix">
                 <string>%</string>
                </property>
@@ -217,7 +217,7 @@
           </widget>
          </item>
          <item row="3" column="2">
-          <widget class="QSpinBox" name="mContrastSpinBox">
+          <widget class="QgsSpinBox" name="mContrastSpinBox">
            <property name="minimum">
             <number>-100</number>
            </property>
@@ -301,7 +301,7 @@
           </widget>
          </item>
          <item row="2" column="2">
-          <widget class="QSpinBox" name="spinBoxSaturation">
+          <widget class="QgsSpinBox" name="spinBoxSaturation">
            <property name="minimum">
             <number>-100</number>
            </property>
@@ -317,7 +317,7 @@
           </widget>
          </item>
          <item row="1" column="2">
-          <widget class="QSpinBox" name="mBrightnessSpinBox">
+          <widget class="QgsSpinBox" name="mBrightnessSpinBox">
            <property name="minimum">
             <number>-255</number>
            </property>
@@ -394,7 +394,7 @@
           </widget>
          </item>
          <item row="4" column="2">
-          <widget class="QDoubleSpinBox" name="mGammaSpinBox">
+          <widget class="QgsDoubleSpinBox" name="mGammaSpinBox">
            <property name="minimum">
             <double>0.100000000000000</double>
            </property>
@@ -446,7 +446,7 @@
           <widget class="QComboBox" name="mZoomedOutResamplingComboBox"/>
          </item>
          <item row="2" column="2">
-          <widget class="QDoubleSpinBox" name="mMaximumOversamplingSpinBox"/>
+          <widget class="QgsDoubleSpinBox" name="mMaximumOversamplingSpinBox"/>
          </item>
          <item row="3" column="0">
           <widget class="QCheckBox" name="mCbEarlyResampling">
@@ -468,10 +468,20 @@
  </widget>
  <customwidgets>
   <customwidget>
+   <class>QgsDoubleSpinBox</class>
+   <extends>QDoubleSpinBox</extends>
+   <header>qgsdoublespinbox.h</header>
+  </customwidget>
+  <customwidget>
    <class>QgsColorButton</class>
    <extends>QToolButton</extends>
    <header>qgscolorbutton.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>QgsSpinBox</class>
+   <extends>QSpinBox</extends>
+   <header>qgsspinbox.h</header>
   </customwidget>
   <customwidget>
    <class>QgsBlendModeComboBox</class>
@@ -480,6 +490,7 @@
   </customwidget>
  </customwidgets>
  <tabstops>
+  <tabstop>cboRenderers</tabstop>
   <tabstop>mBlendModeComboBox</tabstop>
   <tabstop>mSliderBrightness</tabstop>
   <tabstop>mBrightnessSpinBox</tabstop>
@@ -487,14 +498,18 @@
   <tabstop>spinBoxSaturation</tabstop>
   <tabstop>mSliderContrast</tabstop>
   <tabstop>mContrastSpinBox</tabstop>
+  <tabstop>mSliderGamma</tabstop>
+  <tabstop>mGammaSpinBox</tabstop>
   <tabstop>comboGrayscale</tabstop>
   <tabstop>mColorizeCheck</tabstop>
   <tabstop>btnColorizeColor</tabstop>
   <tabstop>sliderColorizeStrength</tabstop>
   <tabstop>spinColorizeStrength</tabstop>
+  <tabstop>mResetColorRenderingBtn</tabstop>
   <tabstop>mZoomedInResamplingComboBox</tabstop>
   <tabstop>mZoomedOutResamplingComboBox</tabstop>
   <tabstop>mMaximumOversamplingSpinBox</tabstop>
+  <tabstop>mCbEarlyResampling</tabstop>
  </tabstops>
  <resources>
   <include location="../../images/images.qrc"/>

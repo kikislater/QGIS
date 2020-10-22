@@ -870,6 +870,9 @@ class TestQgsVectorFileWriter(unittest.TestCase):
         self.assertTrue('ods' in formats)
         parts = formats.split(';;')
         for i in range(2, len(parts) - 1):
+            if 'GeoJSON - Newline Delimited' in parts[i] or 'GeoJSON - Newline Delimited' in parts[i + 1]:
+                # Python's < operator doesn't do locale aware sorting, so skip this problematic one
+                continue
             self.assertLess(parts[i].lower(), parts[i + 1].lower())
 
         # alphabetical sorting
@@ -877,6 +880,9 @@ class TestQgsVectorFileWriter(unittest.TestCase):
         self.assertNotEqual(formats.index('gpkg'), formats2.index('gpkg'))
         parts = formats2.split(';;')
         for i in range(len(parts) - 1):
+            if 'GeoJSON - Newline Delimited' in parts[i] or 'GeoJSON - Newline Delimited' in parts[i + 1]:
+                # Python's < operator doesn't do locale aware sorting, so skip this problematic one
+                continue
             self.assertLess(parts[i].lower(), parts[i + 1].lower())
 
         # hide non spatial
@@ -1039,13 +1045,14 @@ class TestQgsVectorFileWriter(unittest.TestCase):
         f = next(created_layer.getFeatures(QgsFeatureRequest()))
         self.assertEqual(f.geometry().asWkt(), 'Point (10 10)')
 
-    @unittest.skip(int(gdal.VersionInfo('VERSION_NUM')) < GDAL_COMPUTE_VERSION(2, 4, 0))
+    @unittest.skipIf(int(gdal.VersionInfo('VERSION_NUM')) < GDAL_COMPUTE_VERSION(2, 4, 0), "GDAL 2.4.0 required")
     def testWriteWithStringListField(self):
         """
         Test writing with a string list field
         :return:
         """
-        tmpfile = os.path.join(self.basetestpath, 'newstringlistfield.gml')
+        basetestpath = tempfile.mkdtemp()
+        tmpfile = os.path.join(basetestpath, 'newstringlistfield.gml')
         ds = ogr.GetDriverByName('GML').CreateDataSource(tmpfile)
         lyr = ds.CreateLayer('test', geom_type=ogr.wkbPoint)
         lyr.CreateField(ogr.FieldDefn('strfield', ogr.OFTString))

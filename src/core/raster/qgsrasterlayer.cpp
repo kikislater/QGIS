@@ -107,7 +107,7 @@ QgsRasterLayer::QgsRasterLayer()
 
 {
   init();
-  mValid = false;
+  setValid( false );
 }
 
 QgsRasterLayer::QgsRasterLayer( const QString &uri,
@@ -129,7 +129,7 @@ QgsRasterLayer::QgsRasterLayer( const QString &uri,
 
   setDataSource( uri, baseName, providerKey, providerOptions, options.loadDefaultStyle );
 
-  if ( mValid )
+  if ( isValid() )
   {
     mTemporalProperties->setDefaultsFromDataProviderTemporalCapabilities( mDataProvider->temporalCapabilities() );
   }
@@ -140,7 +140,7 @@ QgsRasterLayer::~QgsRasterLayer()
 {
   emit willBeDeleted();
 
-  mValid = false;
+  setValid( false );
   // Note: provider and other interfaces are owned and deleted by pipe
 }
 
@@ -466,7 +466,7 @@ QString QgsRasterLayer::htmlMetadata() const
       myMetadata += QString::number( dataProvider()->sourceNoDataValue( i ) );
     else
       myMetadata += tr( "n/a" );
-    myMetadata += QStringLiteral( "</td>" );
+    myMetadata += QLatin1String( "</td>" );
 
     if ( provider->hasStatistics( i ) )
     {
@@ -479,7 +479,7 @@ QString QgsRasterLayer::htmlMetadata() const
       myMetadata += QStringLiteral( "<td>" ) % tr( "n/a" ) % QStringLiteral( "</td><td>" ) % tr( "n/a" ) % QStringLiteral( "</td>" );
     }
 
-    myMetadata += QStringLiteral( "</tr>\n" );
+    myMetadata += QLatin1String( "</tr>\n" );
   }
 
   //close previous bands table
@@ -603,10 +603,10 @@ void QgsRasterLayer::init()
   mLastViewPort.mHeight = 0;
 }
 
-void QgsRasterLayer::setDataProvider( QString const &provider, const QgsDataProvider::ProviderOptions &options )
+void QgsRasterLayer::setDataProvider( QString const &provider, const QgsDataProvider::ProviderOptions &options, QgsDataProvider::ReadFlags flags )
 {
   QgsDebugMsgLevel( QStringLiteral( "Entered" ), 4 );
-  mValid = false; // assume the layer is invalid until we determine otherwise
+  setValid( false ); // assume the layer is invalid until we determine otherwise
 
   mPipe.remove( mDataProvider ); // deletes if exists
   mDataProvider = nullptr;
@@ -627,7 +627,7 @@ void QgsRasterLayer::setDataProvider( QString const &provider, const QgsDataProv
   if ( QgsApplication::profiler()->groupIsActive( QStringLiteral( "projectload" ) ) )
     profile = qgis::make_unique< QgsScopedRuntimeProfile >( tr( "Create %1 provider" ).arg( provider ), QStringLiteral( "projectload" ) );
 
-  mDataProvider = qobject_cast< QgsRasterDataProvider * >( QgsProviderRegistry::instance()->createProvider( mProviderKey, mDataSource, options ) );
+  mDataProvider = qobject_cast< QgsRasterDataProvider * >( QgsProviderRegistry::instance()->createProvider( mProviderKey, mDataSource, options, flags ) );
   if ( !mDataProvider )
   {
     //QgsMessageLog::logMessage( tr( "Cannot instantiate the data provider" ), tr( "Raster" ) );
@@ -759,9 +759,9 @@ void QgsRasterLayer::setDataProvider( QString const &provider, const QgsDataProv
   {
     if ( mDataProvider->colorInterpretation( bandNo ) == QgsRaster::AlphaBand )
     {
-      if ( mPipe.renderer() )
+      if ( auto *lRenderer = mPipe.renderer() )
       {
-        mPipe.renderer()->setAlphaBand( bandNo );
+        lRenderer->setAlphaBand( bandNo );
       }
       break;
     }
@@ -783,18 +783,18 @@ void QgsRasterLayer::setDataProvider( QString const &provider, const QgsDataProv
   {
     QgsSettings settings;
     QString resampling = settings.value( QStringLiteral( "/Raster/defaultZoomedInResampling" ), QStringLiteral( "nearest neighbour" ) ).toString();
-    if ( resampling == QStringLiteral( "bilinear" ) )
+    if ( resampling == QLatin1String( "bilinear" ) )
     {
       resampleFilter->setZoomedInResampler( new QgsBilinearRasterResampler() );
       mDataProvider->setZoomedInResamplingMethod( QgsRasterDataProvider::ResamplingMethod::Bilinear );
     }
-    else if ( resampling == QStringLiteral( "cubic" ) )
+    else if ( resampling == QLatin1String( "cubic" ) )
     {
       resampleFilter->setZoomedInResampler( new QgsCubicRasterResampler() );
       mDataProvider->setZoomedInResamplingMethod( QgsRasterDataProvider::ResamplingMethod::Cubic );
     }
     resampling = settings.value( QStringLiteral( "/Raster/defaultZoomedOutResampling" ), QStringLiteral( "nearest neighbour" ) ).toString();
-    if ( resampling == QStringLiteral( "bilinear" ) )
+    if ( resampling == QLatin1String( "bilinear" ) )
     {
       resampleFilter->setZoomedOutResampler( new QgsBilinearRasterResampler() );
       mDataProvider->setZoomedOutResamplingMethod( QgsRasterDataProvider::ResamplingMethod::Bilinear );
@@ -849,7 +849,7 @@ void QgsRasterLayer::setDataProvider( QString const &provider, const QgsDataProv
   connect( mDataProvider, &QgsRasterDataProvider::statusChanged, this, &QgsRasterLayer::statusChanged );
 
   //mark the layer as valid
-  mValid = true;
+  setValid( true );
 
   if ( mDataProvider->supportsSubsetString() )
     connect( this, &QgsRasterLayer::subsetStringChanged, this, &QgsMapLayer::configChanged, Qt::UniqueConnection );
@@ -907,12 +907,18 @@ void QgsRasterLayer::setDataSource( const QString &dataSource, const QString &ba
   mDataSource = dataSource;
   mLayerName = baseName;
 
-  setDataProvider( provider, options );
+  QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags();
+  if ( mReadFlags & QgsMapLayer::FlagTrustLayerMetadata )
+  {
+    flags |= QgsDataProvider::FlagTrustDataSource;
+  }
+
+  setDataProvider( provider, options, flags );
 
   if ( mDataProvider )
     mDataProvider->setDataSourceUri( mDataSource );
 
-  if ( mValid )
+  if ( isValid() )
   {
     // load default style
     bool defaultLoadedFlag = false;
@@ -951,7 +957,7 @@ void QgsRasterLayer::setDataSource( const QString &dataSource, const QString &ba
 
 void QgsRasterLayer::closeDataProvider()
 {
-  mValid = false;
+  setValid( false );
   mPipe.remove( mDataProvider );
   mDataProvider = nullptr;
 }
@@ -1291,7 +1297,7 @@ void QgsRasterLayer::refreshRenderer( QgsRasterRenderer *rasterRenderer, const Q
 
 QString QgsRasterLayer::subsetString() const
 {
-  if ( !mValid || !mDataProvider )
+  if ( !isValid() || !mDataProvider )
   {
     QgsDebugMsgLevel( QStringLiteral( "invoked with invalid layer or null mDataProvider" ), 3 );
     return customProperty( QStringLiteral( "storedSubsetString" ) ).toString();
@@ -1305,7 +1311,7 @@ QString QgsRasterLayer::subsetString() const
 
 bool QgsRasterLayer::setSubsetString( const QString &subset )
 {
-  if ( !mValid || !mDataProvider )
+  if ( !isValid() || !mDataProvider )
   {
     QgsDebugMsgLevel( QStringLiteral( "invoked with invalid layer or null mDataProvider or while editing" ), 3 );
     setCustomProperty( QStringLiteral( "storedSubsetString" ), subset );
@@ -1438,9 +1444,9 @@ QDateTime QgsRasterLayer::timestamp() const
 
 bool QgsRasterLayer::accept( QgsStyleEntityVisitorInterface *visitor ) const
 {
-  if ( mPipe.renderer() )
+  if ( auto *lRenderer = mPipe.renderer() )
   {
-    if ( !mPipe.renderer()->accept( visitor ) )
+    if ( !lRenderer->accept( visitor ) )
       return false;
   }
   return true;
@@ -1754,7 +1760,7 @@ QImage QgsRasterLayer::previewAsImage( QSize size, const QColor &bgColor, QImage
 /*
  * \param QDomNode node that will contain the symbology definition for this layer.
  * \param errorMessage reference to string that will be updated with any error messages
- * \return true in case of success.
+ * \return TRUE in case of success.
  */
 bool QgsRasterLayer::readSymbology( const QDomNode &layer_node, QString &errorMessage,
                                     QgsReadWriteContext &context, QgsMapLayer::StyleCategories categories )
@@ -1944,7 +1950,12 @@ bool QgsRasterLayer::readXml( const QDomNode &layer_node, QgsReadWriteContext &c
   if ( !( mReadFlags & QgsMapLayer::FlagDontResolveLayers ) )
   {
     QgsDataProvider::ProviderOptions providerOptions { context.transformContext() };
-    setDataProvider( mProviderKey, providerOptions );
+    QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags();
+    if ( mReadFlags & QgsMapLayer::FlagTrustLayerMetadata )
+    {
+      flags |= QgsDataProvider::FlagTrustDataSource;
+    }
+    setDataProvider( mProviderKey, providerOptions, flags );
   }
 
   mOriginalStyleElement = layer_node.namedItem( QStringLiteral( "originalStyle" ) ).firstChildElement();
@@ -1987,7 +1998,7 @@ bool QgsRasterLayer::readXml( const QDomNode &layer_node, QgsReadWriteContext &c
       closeDataProvider();
       init();
       setDataProvider( mProviderKey );
-      if ( !mValid ) return false;
+      if ( !isValid() ) return false;
     }
   }
 #endif
@@ -2466,8 +2477,13 @@ bool QgsRasterLayer::update()
     closeDataProvider();
     init();
     QgsDataProvider::ProviderOptions providerOptions;
-    setDataProvider( mProviderKey, providerOptions );
+    QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags();
+    if ( mReadFlags & QgsMapLayer::FlagTrustLayerMetadata )
+    {
+      flags |= QgsDataProvider::FlagTrustDataSource;
+    }
+    setDataProvider( mProviderKey, providerOptions, flags );
     emit dataChanged();
   }
-  return mValid;
+  return isValid();
 }

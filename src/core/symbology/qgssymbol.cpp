@@ -110,9 +110,9 @@ QPolygonF QgsSymbol::_getLineString( QgsRenderContext &context, const QgsCurve &
   QPolygonF pts;
 
   //apply clipping for large lines to achieve a better rendering performance
-  if ( clipToExtent && nPoints > 1 )
+  if ( clipToExtent && nPoints > 1 && !( context.flags() & QgsRenderContext::ApplyClipAfterReprojection ) )
   {
-    const QgsRectangle &e = context.extent();
+    const QgsRectangle e = context.extent();
     const double cw = e.width() / 10;
     const double ch = e.height() / 10;
     const QgsRectangle clipRect( e.xMinimum() - cw, e.yMinimum() - ch, e.xMaximum() + cw, e.yMaximum() + ch );
@@ -143,6 +143,16 @@ QPolygonF QgsSymbol::_getLineString( QgsRenderContext &context, const QgsCurve &
     return !std::isfinite( point.x() ) || !std::isfinite( point.y() );
   } ), pts.end() );
 
+  if ( clipToExtent && nPoints > 1 && context.flags() & QgsRenderContext::ApplyClipAfterReprojection )
+  {
+    // early clipping was not possible, so we have to apply it here after transformation
+    const QgsRectangle e = context.mapExtent();
+    const double cw = e.width() / 10;
+    const double ch = e.height() / 10;
+    const QgsRectangle clipRect( e.xMinimum() - cw, e.yMinimum() - ch, e.xMaximum() + cw, e.yMaximum() + ch );
+    pts = QgsClipper::clippedLine( pts, clipRect );
+  }
+
   QPointF *ptr = pts.data();
   for ( int i = 0; i < pts.size(); ++i, ++ptr )
   {
@@ -156,10 +166,6 @@ QPolygonF QgsSymbol::_getPolygonRing( QgsRenderContext &context, const QgsCurve 
 {
   const QgsCoordinateTransform ct = context.coordinateTransform();
   const QgsMapToPixel &mtp = context.mapToPixel();
-  const QgsRectangle &e = context.extent();
-  const double cw = e.width() / 10;
-  const double ch = e.height() / 10;
-  QgsRectangle clipRect( e.xMinimum() - cw, e.yMinimum() - ch, e.xMaximum() + cw, e.yMaximum() + ch );
 
   QPolygonF poly = curve.asQPolygonF();
 
@@ -176,9 +182,12 @@ QPolygonF QgsSymbol::_getPolygonRing( QgsRenderContext &context, const QgsCurve 
   }
 
   //clip close to view extent, if needed
-  const QRectF ptsRect = poly.boundingRect();
-  if ( clipToExtent && !context.extent().contains( ptsRect ) )
+  if ( clipToExtent && !( context.flags() & QgsRenderContext::ApplyClipAfterReprojection ) && !context.extent().contains( poly.boundingRect() ) )
   {
+    const QgsRectangle e = context.extent();
+    const double cw = e.width() / 10;
+    const double ch = e.height() / 10;
+    const QgsRectangle clipRect( e.xMinimum() - cw, e.yMinimum() - ch, e.xMaximum() + cw, e.yMaximum() + ch );
     QgsClipper::trimPolygon( poly, clipRect );
   }
 
@@ -201,6 +210,16 @@ QPolygonF QgsSymbol::_getPolygonRing( QgsRenderContext &context, const QgsCurve 
   {
     return !std::isfinite( point.x() ) || !std::isfinite( point.y() );
   } ), poly.end() );
+
+  if ( clipToExtent && context.flags() & QgsRenderContext::ApplyClipAfterReprojection && !context.mapExtent().contains( poly.boundingRect() ) )
+  {
+    // early clipping was not possible, so we have to apply it here after transformation
+    const QgsRectangle e = context.mapExtent();
+    const double cw = e.width() / 10;
+    const double ch = e.height() / 10;
+    const QgsRectangle clipRect( e.xMinimum() - cw, e.yMinimum() - ch, e.xMaximum() + cw, e.yMaximum() + ch );
+    QgsClipper::trimPolygon( poly, clipRect );
+  }
 
   QPointF *ptr = poly.data();
   for ( int i = 0; i < poly.size(); ++i, ++ptr )
@@ -615,7 +634,7 @@ QImage QgsSymbol::asImage( QSize size, QgsRenderContext *customContext )
 }
 
 
-QImage QgsSymbol::bigSymbolPreviewImage( QgsExpressionContext *expressionContext )
+QImage QgsSymbol::bigSymbolPreviewImage( QgsExpressionContext *expressionContext, QgsSymbol::PreviewFlags flags )
 {
   QImage preview( QSize( 100, 100 ), QImage::Format_ARGB32_Premultiplied );
   preview.fill( 0 );
@@ -624,7 +643,7 @@ QImage QgsSymbol::bigSymbolPreviewImage( QgsExpressionContext *expressionContext
   p.setRenderHint( QPainter::Antialiasing );
   p.translate( 0.5, 0.5 ); // shift by half a pixel to avoid blurring due antialiasing
 
-  if ( mType == QgsSymbol::Marker )
+  if ( mType == QgsSymbol::Marker && flags & PreviewFlag::FlagIncludeCrosshairsForMarkerSymbols )
   {
     p.setPen( QPen( Qt::gray ) );
     p.drawLine( 0, 50, 100, 50 );
@@ -831,6 +850,20 @@ void QgsSymbol::renderFeature( const QgsFeature &feature, QgsRenderContext &cont
   QgsGeometry segmentizedGeometry = geom;
   bool usingSegmentizedGeometry = false;
   context.setGeometry( geom.constGet() );
+
+  if ( geom.type() != QgsWkbTypes::PointGeometry && !geom.boundingBox().isNull() )
+  {
+    try
+    {
+      const QPointF boundsOrigin = _getPoint( context, QgsPoint( geom.boundingBox().xMinimum(), geom.boundingBox().yMinimum() ) );
+      if ( std::isfinite( boundsOrigin.x() ) && std::isfinite( boundsOrigin.y() ) )
+        context.setTextureOrigin( boundsOrigin );
+    }
+    catch ( QgsCsException & )
+    {
+
+    }
+  }
 
   bool tileMapRendering = context.testFlag( QgsRenderContext::RenderMapTile );
 
@@ -1207,7 +1240,7 @@ void QgsSymbol::renderFeature( const QgsFeature &feature, QgsRenderContext &cont
     {
       for ( const LineInfo &info : qgis::as_const( linesToRender ) )
       {
-        if ( context.hasRenderedFeatureHandlers() )
+        if ( context.hasRenderedFeatureHandlers() && !info.renderLine.empty() )
         {
           renderedBoundsGeom = renderedBoundsGeom.isNull() ? QgsGeometry::fromQPolygonF( info.renderLine )
                                : QgsGeometry::collectGeometry( QVector< QgsGeometry>() << QgsGeometry::fromQPolygonF( info.renderLine ) << renderedBoundsGeom );
@@ -1226,7 +1259,7 @@ void QgsSymbol::renderFeature( const QgsFeature &feature, QgsRenderContext &cont
       int i = 0;
       for ( const PolygonInfo &info : qgis::as_const( polygonsToRender ) )
       {
-        if ( context.hasRenderedFeatureHandlers() )
+        if ( context.hasRenderedFeatureHandlers() && !info.renderExterior.empty() )
         {
           renderedBoundsGeom = renderedBoundsGeom.isNull() ? QgsGeometry::fromQPolygonF( info.renderExterior )
                                : QgsGeometry::collectGeometry( QVector< QgsGeometry>() << QgsGeometry::fromQPolygonF( info.renderExterior ) << renderedBoundsGeom );
@@ -1251,7 +1284,7 @@ void QgsSymbol::renderFeature( const QgsFeature &feature, QgsRenderContext &cont
       break;
   }
 
-  if ( context.hasRenderedFeatureHandlers() )
+  if ( context.hasRenderedFeatureHandlers() && !renderedBoundsGeom.isNull() )
   {
     QgsRenderedFeatureHandlerInterface::RenderedFeatureContext featureContext( context );
     const QList< QgsRenderedFeatureHandlerInterface * > handlers = context.renderedFeatureHandlers();

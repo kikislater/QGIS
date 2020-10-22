@@ -107,7 +107,7 @@ QgsGpsInformationWidget::QgsGpsInformationWidget( QgsMapCanvas *mapCanvas, QWidg
   connect( QgsProject::instance()->displaySettings(), &QgsProjectDisplaySettings::bearingFormatChanged, this, [ = ]
   {
     mBearingNumericFormat.reset( QgsProject::instance()->displaySettings()->bearingFormat()->clone() );
-    updateGpsDistanceStatusMessage();
+    updateGpsDistanceStatusMessage( false );
   } );
 
   mCanvasToWgs84Transform = QgsCoordinateTransform( mMapCanvas->mapSettings().destinationCrs(), mWgs84CRS, QgsProject::instance() );
@@ -257,10 +257,12 @@ QgsGpsInformationWidget::QgsGpsInformationWidget( QgsMapCanvas *mapCanvas, QWidg
   mTravelBearingCheckBox->setChecked( mySettings.value( QStringLiteral( "gps/calculateBearingFromTravel" ), "false" ).toBool() );
   mSliderMarkerSize->setValue( mySettings.value( QStringLiteral( "gps/markerSize" ), "12" ).toInt() );
   mSpinTrackWidth->setValue( mySettings.value( QStringLiteral( "gps/trackWidth" ), "2" ).toInt() );
+  mSpinTrackWidth->setClearValue( 2 );
   mBtnTrackColor->setColor( mySettings.value( QStringLiteral( "gps/trackColor" ), QColor( Qt::red ) ).value<QColor>() );
   QString myPortMode = mySettings.value( QStringLiteral( "gps/portMode" ), "scanPorts" ).toString();
 
   mSpinMapExtentMultiplier->setValue( mySettings.value( QStringLiteral( "gps/mapExtentMultiplier" ), "50" ).toInt() );
+  mSpinMapExtentMultiplier->setClearValue( 50 );
   mDateTimeFormat = mySettings.value( QStringLiteral( "gps/dateTimeFormat" ), "" ).toString(); // zero-length string signifies default format
 
   mGpsdHost->setText( mySettings.value( QStringLiteral( "gps/gpsdHost" ), "localhost" ).toString() );
@@ -421,6 +423,7 @@ QgsGpsInformationWidget::QgsGpsInformationWidget( QgsMapCanvas *mapCanvas, QWidg
   mCbxLeapSeconds->setChecked( mySettings.value( QStringLiteral( "gps/applyLeapSeconds" ), true ).toBool() );
   // Leap seconds as of 2019-06-20, if the default changes, it can be updated in qgis_global_settings.ini
   mLeapSeconds->setValue( mySettings.value( QStringLiteral( "gps/leapSecondsCorrection" ), 18 ).toInt() );
+  mLeapSeconds->setClearValue( 18 );
 
   connect( mAcquisitionTimer.get(), &QTimer::timeout,
            this, &QgsGpsInformationWidget::switchAcquisition );
@@ -526,6 +529,11 @@ bool QgsGpsInformationWidget::blockCanvasInteraction( QgsMapCanvasInteractionBlo
   }
 
   return false;
+}
+
+void QgsGpsInformationWidget::setConnection( QgsGpsConnection *connection )
+{
+  connected( connection );
 }
 
 void QgsGpsInformationWidget::mSpinTrackWidth_valueChanged( int value )
@@ -899,7 +907,8 @@ void QgsGpsInformationWidget::displayGPSInformation( const QgsGpsInformation &in
   {
     mTxtLatitude->setText( QString::number( info.latitude, 'f', 8 ) );
     mTxtLongitude->setText( QString::number( info.longitude, 'f', 8 ) );
-    mTxtAltitude->setText( tr( "%1 m" ).arg( info.elevation, 0, 'f', 1 ) ); // don't know of any GPS receivers that output better than 0.1 m precision
+    mTxtAltitude->setText( tr( "%1 m" ).arg( info.elevation, 0, 'f', 3 ) );
+
     if ( mDateTimeFormat.isEmpty() )
     {
       mTxtDateTime->setText( info.utcDateTime.toString( Qt::TextDate ) );  // default format
@@ -934,7 +943,7 @@ void QgsGpsInformationWidget::displayGPSInformation( const QgsGpsInformation &in
     if ( std::isfinite( info.hacc ) )
     {
       mTxtHacc->setEnabled( true );
-      mTxtHacc->setText( QString::number( info.hacc, 'f', 1 ) + "m" );
+      mTxtHacc->setText( tr( "%1 m" ).arg( QLocale().toString( info.hacc, 'f', 3 ) ) );
     }
     else
     {
@@ -944,7 +953,7 @@ void QgsGpsInformationWidget::displayGPSInformation( const QgsGpsInformation &in
     if ( std::isfinite( info.vacc ) )
     {
       mTxtVacc->setEnabled( true );
-      mTxtVacc->setText( QString::number( info.vacc, 'f', 1 ) + "m" );
+      mTxtVacc->setText( tr( "%1 m" ).arg( QLocale().toString( info.vacc, 'f', 3 ) ) );
     }
     else
     {
@@ -953,7 +962,7 @@ void QgsGpsInformationWidget::displayGPSInformation( const QgsGpsInformation &in
     }
     mTxtFixMode->setText( info.fixMode == 'A' ? tr( "Automatic" ) : info.fixMode == 'M' ? tr( "Manual" ) : QString() ); // A=automatic 2d/3d, M=manual; allowing for anything else
     mTxtFixType->setText( info.fixType == 3 ? tr( "3D" ) : info.fixType == 2 ? tr( "2D" ) : info.fixType == 1 ? tr( "No fix" ) : QString::number( info.fixType ) ); // 1=no fix, 2=2D, 3=3D; allowing for anything else
-    mTxtQuality->setText( info.quality == 2 ? tr( "Differential" ) : info.quality == 1 ? tr( "Non-differential" ) : info.quality == 0 ? tr( "No position" ) : info.quality > 2 ? QString::number( info.quality ) : QString() ); // allowing for anything else
+    mTxtQuality->setText( info.qualityDescription() );
     mTxtSatellitesUsed->setText( QString::number( info.satellitesUsed ) );
     mTxtStatus->setText( info.status == 'A' ? tr( "Valid" ) : info.status == 'V' ? tr( "Invalid" ) : QString() );
   } //position
@@ -999,7 +1008,7 @@ void QgsGpsInformationWidget::displayGPSInformation( const QgsGpsInformation &in
       addVertex();
     }
 
-    updateGpsDistanceStatusMessage();
+    updateGpsDistanceStatusMessage( false );
   }
 
   if ( !std::isnan( info.direction ) || ( mTravelBearingCheckBox->isChecked() && !mSecondLastGpsPosition.isEmpty() ) )
@@ -1031,7 +1040,33 @@ void QgsGpsInformationWidget::displayGPSInformation( const QgsGpsInformation &in
 
     if ( mRotateMapCheckBox->isChecked() && ( !mLastRotateTimer.isValid() || mLastRotateTimer.hasExpired( mSpinMapRotateInterval->value() * 1000 ) ) )
     {
-      mMapCanvas->setRotation( trueNorth - bearing - adjustment );
+      QgsCoordinateTransform wgs84ToCanvas( mWgs84CRS, mMapCanvas->mapSettings().destinationCrs(), QgsProject::instance()->transformContext() );
+
+      try
+      {
+        QLineF bearingLine;
+        bearingLine.setP1( wgs84ToCanvas.transform( myNewCenter ).toQPointF() );
+
+        // project out the bearing line by roughly the size of the canvas
+        QgsDistanceArea da1;
+        da1.setSourceCrs( mMapCanvas->mapSettings().destinationCrs(), QgsProject::instance()->transformContext() );
+        da1.setEllipsoid( QgsProject::instance()->ellipsoid() );
+        const double totalLength = da1.measureLine( mMapCanvas->mapSettings().extent().center(), QgsPointXY( mMapCanvas->mapSettings().extent().xMaximum(),
+                                   mMapCanvas->mapSettings().extent().yMaximum() ) );
+
+        QgsDistanceArea da;
+        da.setSourceCrs( mWgs84CRS, QgsProject::instance()->transformContext() );
+        da.setEllipsoid( QgsProject::instance()->ellipsoid() );
+        const QgsPointXY res = da.computeSpheroidProject( myNewCenter, totalLength, ( bearing - trueNorth + adjustment ) * M_PI / 180.0 );
+        bearingLine.setP2( wgs84ToCanvas.transform( res ).toQPointF() );
+
+        mMapCanvas->setRotation( 270 - bearingLine.angle() );
+      }
+      catch ( QgsCsException & )
+      {
+        QgsDebugMsg( QStringLiteral( "Coordinate exception encountered while calculating GPS bearing rotation" ) );
+        mMapCanvas->setRotation( trueNorth - bearing - adjustment );
+      }
       mLastRotateTimer.restart();
     }
 
@@ -1198,7 +1233,7 @@ void QgsGpsInformationWidget::mBtnCloseFeature_clicked()
               tr( "Save Layer Edits" ),
               tr( "Could not commit changes to layer %1\n\nErrors: %2\n" )
               .arg( vlayer->name(),
-                    vlayer->commitErrors().join( QStringLiteral( "\n  " ) ) ) );
+                    vlayer->commitErrors().join( QLatin1String( "\n  " ) ) ) );
           }
 
           vlayer->startEditing();
@@ -1291,7 +1326,7 @@ void QgsGpsInformationWidget::mBtnCloseFeature_clicked()
             QgisApp::instance()->messageBar()->pushCritical( tr( "Save Layer Edits" ),
                 tr( "Could not commit changes to layer %1\n\nErrors: %2\n" )
                 .arg( vlayer->name(),
-                      vlayer->commitErrors().join( QStringLiteral( "\n  " ) ) ) );
+                      vlayer->commitErrors().join( QLatin1String( "\n  " ) ) ) );
           }
 
           vlayer->startEditing();
@@ -1589,7 +1624,7 @@ void QgsGpsInformationWidget::cursorCoordinateChanged( const QgsPointXY &point )
   try
   {
     mLastCursorPosWgs84 = mCanvasToWgs84Transform.transform( point );
-    updateGpsDistanceStatusMessage();
+    updateGpsDistanceStatusMessage( true );
   }
   catch ( QgsCsException & )
   {
@@ -1597,10 +1632,25 @@ void QgsGpsInformationWidget::cursorCoordinateChanged( const QgsPointXY &point )
   }
 }
 
-void QgsGpsInformationWidget::updateGpsDistanceStatusMessage()
+void QgsGpsInformationWidget::updateGpsDistanceStatusMessage( bool forceDisplay )
 {
   if ( !mNmea )
     return;
+
+  static constexpr int GPS_DISTANCE_MESSAGE_TIMEOUT_MS = 2000;
+
+  if ( !forceDisplay )
+  {
+    // if we aren't forcing the display of the message (i.e. in direct response to a mouse cursor movement),
+    // then only show an updated message when the GPS position changes if the previous forced message occurred < 2 seconds ago.
+    // otherwise we end up showing infinite messages as the GPS position constantly changes...
+    if ( mLastForcedStatusUpdate.hasExpired( GPS_DISTANCE_MESSAGE_TIMEOUT_MS ) )
+      return;
+  }
+  else
+  {
+    mLastForcedStatusUpdate.restart();
+  }
 
   const double distance = mDistanceCalculator.convertLengthMeasurement( mDistanceCalculator.measureLine( QVector< QgsPointXY >() << mLastCursorPosWgs84 << mLastGpsPosition ),
                           QgsProject::instance()->distanceUnits() );
@@ -1609,7 +1659,8 @@ void QgsGpsInformationWidget::updateGpsDistanceStatusMessage()
   const QString distanceString = QgsDistanceArea::formatDistance( distance, distanceDecimalPlaces, QgsProject::instance()->distanceUnits() );
   const QString bearingString = mBearingNumericFormat->formatDouble( bearing, QgsNumericFormatContext() );
 
-  QgisApp::instance()->statusBarIface()->showMessage( tr( "%1 (%2) from GPS location" ).arg( distanceString, bearingString ), 2000 );
+  QgisApp::instance()->statusBarIface()->showMessage( tr( "%1 (%2) from GPS location" ).arg( distanceString, bearingString ), forceDisplay ? GPS_DISTANCE_MESSAGE_TIMEOUT_MS
+      : GPS_DISTANCE_MESSAGE_TIMEOUT_MS - mLastForcedStatusUpdate.elapsed() );
 }
 
 void QgsGpsInformationWidget::updateTimestampDestinationFields( QgsMapLayer *mapLayer )
@@ -1654,7 +1705,7 @@ void QgsGpsInformationWidget::tapAndHold( const QgsPointXY &mapPoint, QTapAndHol
   try
   {
     mLastCursorPosWgs84 = mCanvasToWgs84Transform.transform( mapPoint );
-    updateGpsDistanceStatusMessage();
+    updateGpsDistanceStatusMessage( true );
   }
   catch ( QgsCsException & )
   {

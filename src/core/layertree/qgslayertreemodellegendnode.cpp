@@ -68,6 +68,15 @@ QSizeF QgsLayerTreeModelLegendNode::userPatchSize() const
   return mUserSize;
 }
 
+void QgsLayerTreeModelLegendNode::setUserPatchSize( QSizeF size )
+{
+  if ( mUserSize == size )
+    return;
+
+  mUserSize = size;
+  emit sizeChanged();
+}
+
 QgsLayerTreeModelLegendNode::ItemMetrics QgsLayerTreeModelLegendNode::draw( const QgsLegendSettings &settings, ItemContext *ctx )
 {
   QFont symbolLabelFont = settings.style( QgsLegendStyle::SymbolLabel ).font();
@@ -244,8 +253,8 @@ QgsSymbolLegendNode::QgsSymbolLegendNode( QgsLayerTreeLayer *nodeLayer, const Qg
   connect( qobject_cast<QgsVectorLayer *>( nodeLayer->layer() ), &QgsVectorLayer::symbolFeatureCountMapChanged, this, &QgsSymbolLegendNode::updateLabel );
   connect( nodeLayer, &QObject::destroyed, this, [ = ]() { mLayerNode = nullptr; } );
 
-  if ( mItem.symbol() )
-    mSymbolUsesMapUnits = ( mItem.symbol()->outputUnit() != QgsUnitTypes::RenderMillimeters );
+  if ( auto *lSymbol = mItem.symbol() )
+    mSymbolUsesMapUnits = ( lSymbol->outputUnit() != QgsUnitTypes::RenderMillimeters );
 }
 
 Qt::ItemFlags QgsSymbolLegendNode::flags() const
@@ -393,8 +402,8 @@ QgsRenderContext *QgsLayerTreeModelLegendNode::createTemporaryRenderContext() co
   double scale = 0.0;
   double mupp = 0.0;
   int dpi = 0;
-  if ( model() )
-    model()->legendMapViewData( &mupp, &dpi, &scale );
+  if ( auto *lModel = model() )
+    lModel->legendMapViewData( &mupp, &dpi, &scale );
 
   if ( qgsDoubleNear( mupp, 0.0 ) || dpi == 0 || qgsDoubleNear( scale, 0.0 ) )
     return nullptr;
@@ -1034,8 +1043,7 @@ QImage QgsWmsLegendNode::getLegendGraphic() const
       connect( mFetcher.get(), &QgsImageFetcher::error, this, &QgsWmsLegendNode::getLegendGraphicErrored );
       connect( mFetcher.get(), &QgsImageFetcher::progress, this, &QgsWmsLegendNode::getLegendGraphicProgress );
       mFetcher->start();
-    } // else QgsDebugMsg("XXX No legend supported?");
-
+    }
   }
 
   return mImage;
@@ -1043,8 +1051,6 @@ QImage QgsWmsLegendNode::getLegendGraphic() const
 
 QVariant QgsWmsLegendNode::data( int role ) const
 {
-  //QgsDebugMsg( QStringLiteral("XXX data called with role %1 -- mImage size is %2x%3").arg(role).arg(mImage.width()).arg(mImage.height()) );
-
   if ( role == Qt::DecorationRole )
   {
     return QPixmap::fromImage( getLegendGraphic() );
@@ -1099,7 +1105,6 @@ QJsonObject QgsWmsLegendNode::exportSymbolToJson( const QgsLegendSettings &, con
   return json;
 }
 
-/* private */
 QImage QgsWmsLegendNode::renderMessage( const QString &msg ) const
 {
   const int fontHeight = 10;
@@ -1123,38 +1128,34 @@ QImage QgsWmsLegendNode::renderMessage( const QString &msg ) const
 void QgsWmsLegendNode::getLegendGraphicProgress( qint64 cur, qint64 tot )
 {
   QString msg = QStringLiteral( "Downloading... %1/%2" ).arg( cur ).arg( tot );
-  //QgsDebugMsg ( QString("XXX %1").arg(msg) );
   mImage = renderMessage( msg );
   emit dataChanged();
 }
 
-void QgsWmsLegendNode::getLegendGraphicErrored( const QString &msg )
+void QgsWmsLegendNode::getLegendGraphicErrored( const QString & )
 {
-  if ( ! mFetcher ) return; // must be coming after finish
+  if ( ! mFetcher )
+    return; // must be coming after finish
 
-  mImage = renderMessage( msg );
-  //QgsDebugMsg( QStringLiteral("XXX emitting dataChanged after writing an image of %1x%2").arg(mImage.width()).arg(mImage.height()) );
-
+  mImage = QImage();
   emit dataChanged();
 
   mFetcher.reset();
 
   mValid = true; // we consider it valid anyway
-  // ... but remove validity after 5 seconds
-  //QTimer::singleShot(5000, this, SLOT(invalidateMapBasedData()));
 }
 
 void QgsWmsLegendNode::getLegendGraphicFinished( const QImage &image )
 {
-  if ( ! mFetcher ) return; // must be coming after error
+  if ( ! mFetcher )
+    return; // must be coming after error
 
-  //QgsDebugMsg( QStringLiteral("XXX legend graphic finished, image is %1x%2").arg(theImage.width()).arg(theImage.height()) );
   if ( ! image.isNull() )
   {
     if ( image != mImage )
     {
       mImage = image;
-      //QgsDebugMsg( QStringLiteral("XXX emitting dataChanged") );
+      setUserPatchSize( mImage.size() );
       emit dataChanged();
     }
     mValid = true; // only if not null I guess
@@ -1164,7 +1165,6 @@ void QgsWmsLegendNode::getLegendGraphicFinished( const QImage &image )
 
 void QgsWmsLegendNode::invalidateMapBasedData()
 {
-  //QgsDebugMsg( QStringLiteral("XXX invalidateMapBasedData called") );
   // TODO: do this only if this extent != prev extent ?
   mValid = false;
   emit dataChanged();

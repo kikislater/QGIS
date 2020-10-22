@@ -53,8 +53,8 @@ QStringList QgsMdalProvider::subLayers() const
   return mSubLayersUris;
 }
 
-QgsMdalProvider::QgsMdalProvider( const QString &uri, const ProviderOptions &options )
-  : QgsMeshDataProvider( uri, options )
+QgsMdalProvider::QgsMdalProvider( const QString &uri, const ProviderOptions &options, QgsDataProvider::ReadFlags flags )
+  : QgsMeshDataProvider( uri, options, flags )
 {
   temporalCapabilities()->setTemporalUnit( QgsUnitTypes::TemporalHours );
   QByteArray curi = dataSourceUri().toUtf8();
@@ -289,6 +289,10 @@ bool QgsMdalProvider::persistDatasetGroup(
     MDAL_G_setMetadata( g, it.key().toStdString().c_str(), it.value().toStdString().c_str() );
   }
 
+  if ( meta.referenceTime().isValid() )
+  {
+    MDAL_G_setReferenceTime( g, meta.referenceTime().toString( Qt::ISODateWithMs ).toStdString().c_str() );
+  }
 
   for ( int i = 0; i < datasetValues.size(); ++i )
   {
@@ -370,6 +374,11 @@ bool QgsMdalProvider::persistDatasetGroup( const QString &outputFilePath, const 
     MDAL_G_setMetadata( g, it.key().toStdString().c_str(), it.value().toStdString().c_str() );
   }
 
+  if ( meta.referenceTime().isValid() )
+  {
+    MDAL_G_setReferenceTime( g, meta.referenceTime().toString( Qt::ISODateWithMs ).toStdString().c_str() );
+  }
+
   bool fail = false;
   for ( int i = 0; i < datasetCount; ++i )
   {
@@ -434,7 +443,6 @@ void QgsMdalProvider::addGroupToTemporalCapabilities( int indexGroup )
   QgsMeshDataProviderTemporalCapabilities *tempCap = temporalCapabilities();
   QgsMeshDatasetGroupMetadata dsgMetadata = datasetGroupMetadata( indexGroup );
   QDateTime refTime = dsgMetadata.referenceTime();
-  refTime.setTimeSpec( Qt::UTC ); //For now provider doesn't support time zone and return always in local time, force UTC
   tempCap->addGroupReferenceDateTime( indexGroup, refTime );
   int dsCount = datasetCount( indexGroup );
 
@@ -500,7 +508,7 @@ void QgsMdalProvider::fileMeshFilters( QString &fileMeshFiltersString, QString &
 
     QString longName = MDAL_DR_longName( mdalDriver );
     QString driverFilters = MDAL_DR_filters( mdalDriver );
-    driverFilters = driverFilters.replace( QStringLiteral( ";;" ), QStringLiteral( " " ) );
+    driverFilters = driverFilters.replace( QLatin1String( ";;" ), QLatin1String( " " ) );
 
     bool isMeshDriver = MDAL_DR_meshLoadCapability( mdalDriver );
 
@@ -523,11 +531,11 @@ void QgsMdalProvider::fileMeshFilters( QString &fileMeshFiltersString, QString &
   // sort file filters alphabetically
   QStringList filters = fileMeshFiltersString.split( QStringLiteral( ";;" ), QString::SkipEmptyParts );
   filters.sort();
-  fileMeshFiltersString = filters.join( QStringLiteral( ";;" ) ) + ";;";
+  fileMeshFiltersString = filters.join( QLatin1String( ";;" ) ) + ";;";
 
   filters = fileMeshDatasetFiltersString.split( QStringLiteral( ";;" ), QString::SkipEmptyParts );
   filters.sort();
-  fileMeshDatasetFiltersString = filters.join( QStringLiteral( ";;" ) ) + ";;";
+  fileMeshDatasetFiltersString = filters.join( QLatin1String( ";;" ) ) + ";;";
 
   // can't forget the default case - first
   fileMeshFiltersString.prepend( QObject::tr( "All files" ) + " (*);;" );
@@ -589,8 +597,8 @@ void QgsMdalProvider::fileMeshExtensions( QStringList &fileMeshExtensions,
   fileMeshExtensions.erase( std::unique( fileMeshExtensions.begin(), fileMeshExtensions.end() ), fileMeshExtensions.end() );
   fileMeshDatasetExtensions.erase( std::unique( fileMeshDatasetExtensions.begin(), fileMeshDatasetExtensions.end() ), fileMeshDatasetExtensions.end() );
 
-  QgsDebugMsgLevel( "Mesh extensions list built: " + fileMeshExtensions.join( QStringLiteral( ";;" ) ), 2 );
-  QgsDebugMsgLevel( "Mesh dataset extensions list built: " + fileMeshDatasetExtensions.join( QStringLiteral( ";;" ) ), 2 );
+  QgsDebugMsgLevel( "Mesh extensions list built: " + fileMeshExtensions.join( QLatin1String( ";;" ) ), 2 );
+  QgsDebugMsgLevel( "Mesh dataset extensions list built: " + fileMeshDatasetExtensions.join( QLatin1String( ";;" ) ), 2 );
 }
 
 /*----------------------------------------------------------------------------------------------*/
@@ -685,6 +693,8 @@ QgsMeshDatasetGroupMetadata QgsMdalProvider::datasetGroupMetadata( int groupInde
   }
 
   QString referenceTimeString( MDAL_G_referenceTime( group ) );
+  if ( !referenceTimeString.isEmpty() )
+    referenceTimeString.append( 'Z' );//For now provider doesn't support time zone and return always in local time, force UTC
   QDateTime referenceTime = QDateTime::fromString( referenceTimeString, Qt::ISODate );
 
   bool isTemporal = MDAL_G_isTemporal( group );
@@ -878,9 +888,9 @@ QgsMeshDataBlock QgsMdalProvider::areFacesActive( QgsMeshDatasetIndex index, int
 
 /*----------------------------------------------------------------------------------------------*/
 
-QgsMdalProvider *QgsMdalProviderMetadata::createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options )
+QgsMdalProvider *QgsMdalProviderMetadata::createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options, QgsDataProvider::ReadFlags flags )
 {
-  return new QgsMdalProvider( uri, options );
+  return new QgsMdalProvider( uri, options, flags );
 }
 
 QList<QgsDataItemProvider *> QgsMdalProviderMetadata::dataItemProviders() const
@@ -888,6 +898,87 @@ QList<QgsDataItemProvider *> QgsMdalProviderMetadata::dataItemProviders() const
   QList<QgsDataItemProvider *> providers;
   providers << new QgsMdalDataItemProvider;
   return providers;
+}
+
+bool QgsMdalProviderMetadata::createMeshData( const QgsMesh &mesh, const QString uri, const QString &driverName, const QgsCoordinateReferenceSystem &crs ) const
+{
+  MDAL_DriverH driver = MDAL_driverFromName( driverName.toStdString().c_str() );
+  if ( !driver )
+    return false;
+
+  MDAL_MeshH mdalMesh = MDAL_CreateMesh( driver );
+
+  if ( !mdalMesh )
+    return false;
+
+  int bufferSize = 2000;
+  int vertexIndex = 0;
+  int faceIndex = 0;
+
+  while ( vertexIndex < mesh.vertexCount() )
+  {
+    int vertexCount = std::min( bufferSize, mesh.vertexCount() - vertexIndex );
+    QVector<double> verticesCoordinates( vertexCount * 3 );
+    for ( int i = 0; i < vertexCount ; ++i )
+    {
+      int globalIndex = vertexIndex + i;
+      const QgsMeshVertex &vert = mesh.vertex( globalIndex );
+      verticesCoordinates[i * 3  ] = vert.x();
+      verticesCoordinates[i * 3 + 1] = vert.y();
+      verticesCoordinates[i * 3 + 2] = vert.z();
+    }
+    vertexIndex += vertexCount;
+
+    MDAL_M_addVertices( mdalMesh, vertexCount, verticesCoordinates.data() );
+  }
+
+  while ( faceIndex < mesh.faceCount() )
+  {
+    int faceCount = std::min( bufferSize, mesh.faceCount() - faceIndex );
+    QVector<int> faceSizes( faceCount );
+    QVector<int> indices;
+    for ( int i = 0; i < faceCount; ++i )
+    {
+      const QgsMeshFace &face = mesh.face( faceIndex + i );
+      faceSizes[i] = face.count();
+      for ( int j = 0; j < faceSizes[i]; ++j )
+        indices.push_back( face.at( j ) );
+    }
+    MDAL_M_addFaces( mdalMesh, faceCount, faceSizes.data(), indices.data() );
+    if ( MDAL_LastStatus() != MDAL_Status::None )
+    {
+      MDAL_CloseMesh( mdalMesh );
+      return false;
+    }
+    faceIndex += faceCount;
+  }
+
+  MDAL_M_setProjection( mdalMesh, crs.toWkt( QgsCoordinateReferenceSystem::WKT_PREFERRED ).toStdString().c_str() );
+
+  MDAL_SaveMesh( mdalMesh, uri.toStdString().c_str(), driverName.toStdString().c_str() );
+
+  if ( MDAL_LastStatus() != MDAL_Status::None )
+  {
+    MDAL_CloseMesh( mdalMesh );
+    return false;
+  }
+
+  MDAL_CloseMesh( mdalMesh );
+  return true;
+}
+
+QVariantMap QgsMdalProviderMetadata::decodeUri( const QString &uri )
+{
+  const QString path = uri;
+  QVariantMap uriComponents;
+  uriComponents.insert( QStringLiteral( "path" ), path );
+  return uriComponents;
+}
+
+QString QgsMdalProviderMetadata::encodeUri( const QVariantMap &parts )
+{
+  const QString path = parts.value( QStringLiteral( "path" ) ).toString();
+  return path;
 }
 
 QString QgsMdalProviderMetadata::filters( FilterType type )
@@ -942,6 +1033,9 @@ QList<QgsMeshDriverMetadata> QgsMdalProviderMetadata::meshDriversMetadata()
     bool hasSaveEdgeDatasetsCapability = MDAL_DR_writeDatasetsCapability( mdalDriver, MDAL_DataLocation::DataOnEdges );
     if ( hasSaveEdgeDatasetsCapability )
       capabilities |= QgsMeshDriverMetadata::CanWriteEdgeDatasets;
+    bool hasMeshSaveCapability = MDAL_DR_saveMeshCapability( mdalDriver );
+    if ( hasMeshSaveCapability )
+      capabilities |= QgsMeshDriverMetadata::CanWriteMeshData;
     const QgsMeshDriverMetadata meta( name, longName, capabilities, writeDatasetSuffix );
     ret.push_back( meta );
   }

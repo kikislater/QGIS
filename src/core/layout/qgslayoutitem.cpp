@@ -128,7 +128,7 @@ int QgsLayoutItem::type() const
 
 QgsLayoutItem::Flags QgsLayoutItem::itemFlags() const
 {
-  return nullptr;
+  return QgsLayoutItem::Flags();
 }
 
 void QgsLayoutItem::setId( const QString &id )
@@ -576,8 +576,8 @@ void QgsLayoutItem::setScenePos( const QPointF destinationPos )
   //since setPos does not account for item rotation, use difference between
   //current scenePos (which DOES account for rotation) and destination pos
   //to calculate how much the item needs to move
-  if ( parentItem() )
-    setPos( pos() + ( destinationPos - scenePos() ) + parentItem()->scenePos() );
+  if ( auto *lParentItem = parentItem() )
+    setPos( pos() + ( destinationPos - scenePos() ) + lParentItem->scenePos() );
   else
     setPos( pos() + ( destinationPos - scenePos() ) );
 }
@@ -589,6 +589,9 @@ bool QgsLayoutItem::shouldBlockUndoCommands() const
 
 bool QgsLayoutItem::shouldDrawItem() const
 {
+  if ( mLayout && QgsLayoutUtils::itemIsAClippingSource( this ) )
+    return false;
+
   if ( !mLayout || mLayout->renderContext().isPreviewRender() )
   {
     //preview mode so OK to draw item
@@ -687,7 +690,7 @@ bool QgsLayoutItem::writeXml( QDomElement &parentElement, QDomDocument &doc, con
 
 bool QgsLayoutItem::readXml( const QDomElement &element, const QDomDocument &doc, const QgsReadWriteContext &context )
 {
-  if ( element.nodeName() != QStringLiteral( "LayoutItem" ) )
+  if ( element.nodeName() != QLatin1String( "LayoutItem" ) )
   {
     return false;
   }
@@ -1165,6 +1168,11 @@ bool QgsLayoutItem::accept( QgsStyleEntityVisitorInterface *visitor ) const
   return true;
 }
 
+QgsGeometry QgsLayoutItem::clipPath() const
+{
+  return QgsGeometry();
+}
+
 void QgsLayoutItem::refresh()
 {
   QgsLayoutObject::refresh();
@@ -1202,6 +1210,13 @@ void QgsLayoutItem::drawDebugRect( QPainter *painter )
   painter->drawRect( rect() );
 }
 
+QPainterPath QgsLayoutItem::framePath() const
+{
+  QPainterPath path;
+  path.addRect( QRectF( 0, 0, rect().width(), rect().height() ) );
+  return path;
+}
+
 void QgsLayoutItem::drawFrame( QgsRenderContext &context )
 {
   if ( !mFrame || !context.painter() )
@@ -1215,7 +1230,7 @@ void QgsLayoutItem::drawFrame( QgsRenderContext &context )
   p->setBrush( Qt::NoBrush );
   context.setPainterFlagsUsingContext( p );
 
-  p->drawRect( QRectF( 0, 0, rect().width(), rect().height() ) );
+  p->drawPath( framePath() );
 }
 
 void QgsLayoutItem::drawBackground( QgsRenderContext &context )
@@ -1230,7 +1245,7 @@ void QgsLayoutItem::drawBackground( QgsRenderContext &context )
   p->setPen( Qt::NoPen );
   context.setPainterFlagsUsingContext( p );
 
-  p->drawRect( QRectF( 0, 0, rect().width(), rect().height() ) );
+  p->drawPath( framePath() );
 }
 
 void QgsLayoutItem::setFixedSize( const QgsLayoutSize &size )

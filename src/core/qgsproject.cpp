@@ -62,6 +62,7 @@
 #include "qgsprojecttimesettings.h"
 #include "qgsvectortilelayer.h"
 #include "qgsruntimeprofiler.h"
+#include "qgsannotationlayer.h"
 
 #include <algorithm>
 #include <QApplication>
@@ -94,7 +95,11 @@ QgsProject *QgsProject::sProject = nullptr;
 QStringList makeKeyTokens_( const QString &scope, const QString &key )
 {
   QStringList keyTokens = QStringList( scope );
+#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
   keyTokens += key.split( '/', QString::SkipEmptyParts );
+#else
+  keyTokens += key.split( '/', Qt::SkipEmptyParts );
+#endif
 
   // be sure to include the canonical root node
   keyTokens.push_front( QStringLiteral( "properties" ) );
@@ -375,6 +380,10 @@ QgsProject::QgsProject( QObject *parent )
   , mAuxiliaryStorage( new QgsAuxiliaryStorage() )
 {
   mProperties.setName( QStringLiteral( "properties" ) );
+
+  mMainAnnotationLayer = new QgsAnnotationLayer( QObject::tr( "Annotations" ), QgsAnnotationLayer::LayerOptions( mTransformContext ) );
+  mMainAnnotationLayer->setParent( this );
+
   clear();
 
   // bind the layer tree to the map layer registry.
@@ -577,7 +586,7 @@ void QgsProject::registerTranslatableObjects( QgsTranslationContext *translation
 
         translationContext->registerTranslation( QStringLiteral( "project:layers:%1:fieldaliases" ).arg( vlayer->id() ), fieldName );
 
-        if ( field.editorWidgetSetup().type() == QStringLiteral( "ValueRelation" ) )
+        if ( field.editorWidgetSetup().type() == QLatin1String( "ValueRelation" ) )
         {
           translationContext->registerTranslation( QStringLiteral( "project:layers:%1:fields:%2:valuerelationvalue" ).arg( vlayer->id(), field.name() ), field.editorWidgetSetup().config().value( QStringLiteral( "Value" ) ).toString() );
         }
@@ -760,6 +769,7 @@ void QgsProject::setTransformContext( const QgsCoordinateTransformContext &conte
   mTransformContext = context;
   mProjectScope.reset();
 
+  mMainAnnotationLayer->setTransformContext( context );
   for ( auto &layer : mLayerStore.get()->mapLayers() )
   {
     layer->setTransformContext( context );
@@ -849,6 +859,8 @@ void QgsProject::clear()
 
   removeAllMapLayers();
   mRootGroup->clear();
+  if ( mMainAnnotationLayer )
+    mMainAnnotationLayer->reset();
 
   setDirty( false );
   emit homePathChanged();
@@ -1057,13 +1069,17 @@ bool QgsProject::_getMapLayers( const QDomDocument &doc, QList<QDomNode> &broken
 
   bool returnStatus = true;
 
-  emit layerLoaded( 0, nl.count() );
-
   // order layers based on their dependencies
   QgsScopedRuntimeProfile profile( tr( "Sorting layers" ), QStringLiteral( "projectload" ) );
   QgsLayerDefinition::DependencySorter depSorter( doc );
-  if ( depSorter.hasCycle() || depSorter.hasMissingDependency() )
+  if ( depSorter.hasCycle() )
     return false;
+
+  // Missing a dependency? We still load all the layers, otherwise the project is completely broken!
+  if ( depSorter.hasMissingDependency() )
+    returnStatus = false;
+
+  emit layerLoaded( 0, nl.count() );
 
   const QVector<QDomNode> sortedLayerNodes = depSorter.sortedLayerNodes();
   const int totalLayerCount = sortedLayerNodes.count();
@@ -1120,7 +1136,7 @@ bool QgsProject::addLayer( const QDomElement &layerElem, QList<QDomNode> &broken
     // apply specific settings to vector layer
     if ( QgsVectorLayer *vl = qobject_cast<QgsVectorLayer *>( mapLayer.get() ) )
     {
-      vl->setReadExtentFromXml( mTrustLayerMetadata );
+      vl->setReadExtentFromXml( mTrustLayerMetadata || ( flags & QgsProject::ReadFlag::FlagTrustLayerMetadata ) );
     }
   }
   else if ( type == QLatin1String( "raster" ) )
@@ -1140,7 +1156,11 @@ bool QgsProject::addLayer( const QDomElement &layerElem, QList<QDomNode> &broken
     QString typeName = layerElem.attribute( QStringLiteral( "name" ) );
     mapLayer.reset( QgsApplication::pluginLayerRegistry()->createLayer( typeName ) );
   }
-
+  else if ( type == QLatin1String( "annotation" ) )
+  {
+    QgsAnnotationLayer::LayerOptions options( mTransformContext );
+    mapLayer = qgis::make_unique<QgsAnnotationLayer>( QString(), options );
+  }
   if ( !mapLayer )
   {
     QgsDebugMsg( QStringLiteral( "Unable to create layer" ) );
@@ -1159,6 +1179,9 @@ bool QgsProject::addLayer( const QDomElement &layerElem, QList<QDomNode> &broken
   QgsMapLayer::ReadFlags layerFlags = QgsMapLayer::ReadFlags();
   if ( flags & QgsProject::ReadFlag::FlagDontResolveLayers )
     layerFlags |= QgsMapLayer::FlagDontResolveLayers;
+  // Propagate trust layer metadata flag
+  if ( mTrustLayerMetadata || ( flags & QgsProject::ReadFlag::FlagTrustLayerMetadata ) )
+    layerFlags |= QgsMapLayer::FlagTrustLayerMetadata;
 
   profile.switchTask( tr( "Load layer source" ) );
   bool layerIsValid = mapLayer->readLayerXml( layerElem, context, layerFlags ) && mapLayer->isValid();
@@ -1492,6 +1515,7 @@ bool QgsProject::readProjectFile( const QString &filename, QgsProject::ReadFlags
       mEvaluateDefaultValues = true;
   }
 
+  // Read trust layer metadata config in the project
   nl = doc->elementsByTagName( QStringLiteral( "trust" ) );
   if ( nl.count() )
   {
@@ -1536,6 +1560,9 @@ bool QgsProject::readProjectFile( const QString &filename, QgsProject::ReadFlags
     // (default implementation ignores them, there's also a GUI handler that lets user choose correct path)
     mBadLayerHandler->handleBadLayers( brokenNodes );
   }
+
+  mMainAnnotationLayer->readLayerXml( doc->documentElement().firstChildElement( QStringLiteral( "main-annotation-layer" ) ), context );
+  mMainAnnotationLayer->setTransformContext( mTransformContext );
 
   // Resolve references to other layers
   // Needs to be done here once all dependent layers are loaded
@@ -2136,7 +2163,7 @@ bool QgsProject::writeProjectFile( const QString &filename )
 
   QDomElement qgisNode = doc->createElement( QStringLiteral( "qgis" ) );
   qgisNode.setAttribute( QStringLiteral( "projectname" ), title() );
-  qgisNode.setAttribute( QStringLiteral( "version" ), QStringLiteral( "%1" ).arg( Qgis::version() ) );
+  qgisNode.setAttribute( QStringLiteral( "version" ), Qgis::version() );
 
   QgsSettings settings;
   if ( !settings.value( QStringLiteral( "projects/anonymize_saved_projects" ), false, QgsSettings::Core ).toBool() )
@@ -2203,6 +2230,10 @@ bool QgsProject::writeProjectFile( const QString &filename )
 
   // within top level node save list of layers
   const QMap<QString, QgsMapLayer *> &layers = mapLayers();
+
+  QDomElement annotationLayerNode = doc->createElement( QStringLiteral( "main-annotation-layer" ) );
+  mMainAnnotationLayer->writeLayerXml( annotationLayerNode, *doc, context );
+  qgisNode.appendChild( annotationLayerNode );
 
   // Iterate over layers in zOrder
   // Call writeXml() on each
@@ -2484,6 +2515,9 @@ QStringList QgsProject::readListEntry( const QString &scope,
       return value.toStringList();
     }
   }
+  else if ( ok )
+    *ok = false;
+
 
   return def;
 }
@@ -2509,6 +2543,8 @@ QString QgsProject::readEntry( const QString &scope,
     if ( valid )
       return value.toString();
   }
+  else if ( ok )
+    *ok = false;
 
   return def;
 }
@@ -2556,6 +2592,8 @@ double QgsProject::readDoubleEntry( const QString &scope, const QString &key,
     if ( valid )
       return value.toDouble();
   }
+  else if ( ok )
+    *ok = false;
 
   return def;
 }
@@ -2576,6 +2614,8 @@ bool QgsProject::readBoolEntry( const QString &scope, const QString &key, bool d
     if ( valid )
       return value.toBool();
   }
+  else if ( ok )
+    *ok = false;
 
   return def;
 }
@@ -3370,6 +3410,11 @@ QgsMapLayer *QgsProject::takeMapLayer( QgsMapLayer *layer )
 {
   mProjectScope.reset();
   return mLayerStore->takeMapLayer( layer );
+}
+
+QgsAnnotationLayer *QgsProject::mainAnnotationLayer()
+{
+  return mMainAnnotationLayer;
 }
 
 void QgsProject::removeAllMapLayers()

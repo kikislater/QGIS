@@ -322,12 +322,20 @@ matches the settings from that context.
 .. seealso:: :py:func:`drawPreviewIcon`
 %End
 
-    QImage bigSymbolPreviewImage( QgsExpressionContext *expressionContext = 0 );
+    enum PreviewFlag
+    {
+      FlagIncludeCrosshairsForMarkerSymbols,
+    };
+    typedef QFlags<QgsSymbol::PreviewFlag> PreviewFlags;
+
+
+    QImage bigSymbolPreviewImage( QgsExpressionContext *expressionContext = 0, QgsSymbol::PreviewFlags flags = QgsSymbol::FlagIncludeCrosshairsForMarkerSymbols );
 %Docstring
 Returns a large (roughly 100x100 pixel) preview image for the symbol.
 
 :param expressionContext: optional expression context, for evaluation of
                           data defined symbol properties
+:param flags: optional flags to control how preview image is generated
 
 .. seealso:: :py:func:`asImage`
 
@@ -435,7 +443,7 @@ extent. If this option is enabled then features which are partially outside the 
 will be clipped. This speeds up rendering of the feature, but may have undesirable
 side effects for certain symbol types.
 
-:param clipFeaturesToExtent: set to true to enable clipping (defaults to ``True``)
+:param clipFeaturesToExtent: set to ``True`` to enable clipping (defaults to ``True``)
 
 .. seealso:: :py:func:`clipFeaturesToExtent`
 
@@ -601,7 +609,7 @@ class QgsSymbolRenderContext
   public:
 
 
-    QgsSymbolRenderContext( QgsRenderContext &c, QgsUnitTypes::RenderUnit u, qreal opacity = 1.0, bool selected = false, QgsSymbol::RenderHints renderHints = 0, const QgsFeature *f = 0, const QgsFields &fields = QgsFields(), const QgsMapUnitScale &mapUnitScale = QgsMapUnitScale() );
+    QgsSymbolRenderContext( QgsRenderContext &c, QgsUnitTypes::RenderUnit u, qreal opacity = 1.0, bool selected = false, QgsSymbol::RenderHints renderHints = QgsSymbol::RenderHints(), const QgsFeature *f = 0, const QgsFields &fields = QgsFields(), const QgsMapUnitScale &mapUnitScale = QgsMapUnitScale() );
 %Docstring
 Constructor for QgsSymbolRenderContext
 
@@ -1053,7 +1061,7 @@ If only a single symbol layer from the symbol should be rendered, it should be s
 in the ``layer`` argument. A ``layer`` of -1 indicates that all symbol layers should be
 rendered.
 
-If ``selected`` is true then the symbol will be drawn using the "selected feature"
+If ``selected`` is ``True`` then the symbol will be drawn using the "selected feature"
 style and colors instead of the symbol's normal style.
 %End
 
@@ -1180,7 +1188,7 @@ If only a single symbol layer from the symbol should be rendered, it should be s
 in the ``layer`` argument. A ``layer`` of -1 indicates that all symbol layers should be
 rendered.
 
-If ``selected`` is true then the symbol will be drawn using the "selected feature"
+If ``selected`` is ``True`` then the symbol will be drawn using the "selected feature"
 style and colors instead of the symbol's normal style.
 %End
 
@@ -1229,7 +1237,7 @@ If only a single symbol layer from the symbol should be rendered, it should be s
 in the ``layer`` argument. A ``layer`` of -1 indicates that all symbol layers should be
 rendered.
 
-If ``selected`` is true then the symbol will be drawn using the "selected feature"
+If ``selected`` is ``True`` then the symbol will be drawn using the "selected feature"
 style and colors instead of the symbol's normal style.
 %End
 
@@ -1237,6 +1245,9 @@ style and colors instead of the symbol's normal style.
 
 
 };
+
+QFlags<QgsSymbol::PreviewFlag> operator|(QgsSymbol::PreviewFlag f1, QFlags<QgsSymbol::PreviewFlag> f2);
+
 
 
 /************************************************************************

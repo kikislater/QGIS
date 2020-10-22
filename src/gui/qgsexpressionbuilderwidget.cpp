@@ -160,8 +160,6 @@ QgsExpressionBuilderWidget::QgsExpressionBuilderWidget( QWidget *parent )
   functionsplit->restoreState( settings.value( QStringLiteral( "Windows/QgsExpressionBuilderWidget/functionsplitter" ) ).toByteArray() );
   mShowHelpButton->setEnabled( functionsplit->sizes().at( 1 ) == 0 );
 
-  txtExpressionString->setFoldingVisible( false );
-
   if ( QgsPythonRunner::isValid() )
   {
     QgsPythonRunner::eval( QStringLiteral( "qgis.user.expressionspath" ), mFunctionsPath );
@@ -204,7 +202,8 @@ QgsExpressionBuilderWidget::QgsExpressionBuilderWidget( QWidget *parent )
   txtExpressionString->setCallTipsVisible( 0 );
 
   setExpectedOutputFormat( QString() );
-  mFunctionBuilderHelp->setMarginVisible( false );
+  mFunctionBuilderHelp->setLineNumbersVisible( false );
+  mFunctionBuilderHelp->setFoldingVisible( false );
   mFunctionBuilderHelp->setEdgeMode( QsciScintilla::EdgeNone );
   mFunctionBuilderHelp->setEdgeColumn( 0 );
   mFunctionBuilderHelp->setReadOnly( true );

@@ -48,9 +48,10 @@ from qgis.core import (
     QgsProviderRegistry,
     QgsVectorDataProvider,
     QgsDataSourceUri,
+    QgsProviderConnectionException,
 )
 from qgis.gui import QgsGui, QgsAttributeForm
-from qgis.PyQt.QtCore import QDate, QTime, QDateTime, QVariant, QDir, QObject, QByteArray
+from qgis.PyQt.QtCore import QDate, QTime, QDateTime, QVariant, QDir, QObject, QByteArray, QTemporaryDir
 from qgis.PyQt.QtWidgets import QLabel
 from qgis.testing import start_app, unittest
 from qgis.PyQt.QtXml import QDomDocument
@@ -137,6 +138,21 @@ class TestPyQgsPostgresProvider(unittest.TestCase, ProviderTestCase):
 
     def partiallyCompiledFilters(self):
         return set([])
+
+    def getGeneratedColumnsData(self):
+        """
+        return a tuple with the generated column test layer and the expected generated value
+        """
+        cur = self.con.cursor()
+        cur.execute("SHOW server_version_num")
+        pgversion = int(cur.fetchone()[0])
+
+        # don't trigger this test when PostgreSQL versions earlier than 12.
+        if pgversion < 120000:
+            return (None, None)
+        else:
+            return (QgsVectorLayer(self.dbconn + ' sslmode=disable table="qgis_test"."generated_columns"', 'test', 'postgres'),
+                    """('test:'::text || ((pk)::character varying)::text)""")
 
     # HERE GO THE PROVIDER SPECIFIC TESTS
     def testDefaultValue(self):
@@ -1911,6 +1927,35 @@ class TestPyQgsPostgresProvider(unittest.TestCase, ProviderTestCase):
         ids = styles[1]
         self.assertEqual(len(ids), 0)
 
+    def testSaveStyleInvalidXML(self):
+
+        self.execSQLCommand('DROP TABLE IF EXISTS layer_styles CASCADE')
+
+        vl = self.getEditableLayer()
+        self.assertTrue(vl.isValid())
+        self.assertTrue(
+            vl.dataProvider().isSaveAndLoadStyleToDatabaseSupported())
+        self.assertTrue(vl.dataProvider().isDeleteStyleFromDatabaseSupported())
+
+        mFilePath = QDir.toNativeSeparators(
+            '%s/symbol_layer/%s.qml' % (unitTestDataPath(), "fontSymbol"))
+        status = vl.loadNamedStyle(mFilePath)
+        self.assertTrue(status)
+
+        errorMsg = vl.saveStyleToDatabase(
+            "fontSymbol", "font with invalid utf8 char", False, "")
+        self.assertEqual(errorMsg, "")
+
+        qml, errmsg = vl.getStyleFromDatabase("1")
+        self.assertTrue('v="\u001E"' in qml)
+        self.assertEqual(errmsg, "")
+
+        # Test loadStyle from metadata
+        md = QgsProviderRegistry.instance().providerMetadata('postgres')
+        qml = md.loadStyle(self.dbconn + " type=POINT table=\"qgis_test\".\"editData\" (geom)", 'fontSymbol')
+        self.assertTrue(qml.startswith('<!DOCTYPE qgi'), qml)
+        self.assertTrue('v="\u001E"' in qml)
+
     def testHasMetadata(self):
         # views don't have metadata
         vl = QgsVectorLayer('{} table="qgis_test"."{}" key="pk" sql='.format(self.dbconn, 'bikes_view'), "bikes_view",
@@ -2874,6 +2919,124 @@ class TestPyQgsPostgresProviderBigintSinglePk(unittest.TestCase, ProviderTestCas
         # and the query internally rewritten
         # feature = next(vl.getFeatures())
         # self.assertTrue(vl.isValid())
+
+    def testUnrestrictedGeometryType(self):
+        """Test geometry column with no explicit geometry type, regression GH #38565"""
+
+        md = QgsProviderRegistry.instance().providerMetadata("postgres")
+        conn = md.createConnection(self.dbconn, {})
+
+        # Cleanup if needed
+        try:
+            conn.dropVectorTable('qgis_test', 'test_unrestricted_geometry')
+        except QgsProviderConnectionException:
+            pass
+
+        conn.executeSql('''
+        CREATE TABLE "qgis_test"."test_unrestricted_geometry" (
+            gid serial primary key,
+            geom geometry(Geometry, 4326)
+        );''')
+
+        points = QgsVectorLayer(self.dbconn + ' sslmode=disable key=\'gid\' srid=4326 type=POINT table="qgis_test"."test_unrestricted_geometry" (geom) sql=', 'test_points', 'postgres')
+        lines = QgsVectorLayer(self.dbconn + ' sslmode=disable key=\'gid\' srid=4326 type=LINESTRING table="qgis_test"."test_unrestricted_geometry" (geom) sql=', 'test_lines', 'postgres')
+        polygons = QgsVectorLayer(self.dbconn + ' sslmode=disable key=\'gid\' srid=4326 type=POLYGON table="qgis_test"."test_unrestricted_geometry" (geom) sql=', 'test_polygons', 'postgres')
+
+        self.assertTrue(points.isValid())
+        self.assertTrue(lines.isValid())
+        self.assertTrue(polygons.isValid())
+
+        f = QgsFeature(points.fields())
+        f.setGeometry(QgsGeometry.fromWkt('point(9 45)'))
+        self.assertTrue(points.dataProvider().addFeatures([f]))
+        self.assertEqual(points.featureCount(), 1)
+        self.assertEqual(lines.featureCount(), 0)
+        self.assertEqual(polygons.featureCount(), 0)
+
+        # Fetch from iterator
+        self.assertTrue(compareWkt(next(points.getFeatures()).geometry().asWkt(), 'point(9 45)'))
+        with self.assertRaises(StopIteration):
+            next(lines.getFeatures())
+        with self.assertRaises(StopIteration):
+            next(polygons.getFeatures())
+
+        f.setGeometry(QgsGeometry.fromWkt('linestring(9 45, 10 46)'))
+        self.assertTrue(lines.dataProvider().addFeatures([f]))
+        self.assertEqual(points.featureCount(), 1)
+        self.assertEqual(lines.featureCount(), 1)
+        self.assertEqual(polygons.featureCount(), 0)
+
+        # Fetch from iterator
+        self.assertTrue(compareWkt(next(points.getFeatures()).geometry().asWkt(), 'point(9 45)'))
+        self.assertTrue(compareWkt(next(lines.getFeatures()).geometry().asWkt(), 'linestring(9 45, 10 46)'))
+        with self.assertRaises(StopIteration):
+            next(polygons.getFeatures())
+
+        # Test regression GH #38567 (no SRID requested in the data source URI)
+        # Cleanup if needed
+        conn.executeSql('DELETE FROM "qgis_test"."test_unrestricted_geometry" WHERE \'t\'')
+
+        points = QgsVectorLayer(self.dbconn + ' sslmode=disable key=\'gid\' type=POINT table="qgis_test"."test_unrestricted_geometry" (geom) sql=', 'test_points', 'postgres')
+        lines = QgsVectorLayer(self.dbconn + ' sslmode=disable key=\'gid\' type=LINESTRING table="qgis_test"."test_unrestricted_geometry" (geom) sql=', 'test_lines', 'postgres')
+        polygons = QgsVectorLayer(self.dbconn + ' sslmode=disable key=\'gid\' type=POLYGON table="qgis_test"."test_unrestricted_geometry" (geom) sql=', 'test_polygons', 'postgres')
+
+        self.assertTrue(points.isValid())
+        self.assertTrue(lines.isValid())
+        self.assertTrue(polygons.isValid())
+
+    def testTrustFlag(self):
+        """Test regression https://github.com/qgis/QGIS/issues/38809"""
+
+        vl = QgsVectorLayer(
+            self.dbconn +
+            ' sslmode=disable key=\'pk\' srid=4326 type=POINT table="qgis_test"."editData" (geom) sql=',
+            'testTrustFlag', 'postgres')
+
+        self.assertTrue(vl.isValid())
+
+        p = QgsProject.instance()
+        d = QTemporaryDir()
+        dir_path = d.path()
+
+        self.assertTrue(p.addMapLayers([vl]))
+        project_path = os.path.join(dir_path, 'testTrustFlag.qgs')
+        self.assertTrue(p.write(project_path))
+
+        del vl
+
+        p.clear()
+        self.assertTrue(p.read(project_path))
+        vl = p.mapLayersByName('testTrustFlag')[0]
+        self.assertTrue(vl.isValid())
+        self.assertFalse(p.trustLayerMetadata())
+
+        # Set the trust flag
+        p.setTrustLayerMetadata(True)
+        self.assertTrue(p.write(project_path))
+
+        # Re-read
+        p.clear()
+        self.assertTrue(p.read(project_path))
+        self.assertTrue(p.trustLayerMetadata())
+        vl = p.mapLayersByName('testTrustFlag')[0]
+        self.assertTrue(vl.isValid())
+
+    def testQueryLayerDuplicatedFields(self):
+        """Test that duplicated fields from a query layer are returned"""
+
+        def _get_layer(sql):
+            return QgsVectorLayer(
+                self.dbconn +
+                ' sslmode=disable key=\'__rid__\' table=\'(SELECT row_number() OVER () AS __rid__, * FROM (' + sql + ') as foo)\'  sql=',
+                'test', 'postgres')
+
+        l = _get_layer('SELECT 1, 2')
+        self.assertEqual(l.fields().count(), 3)
+        self.assertEqual([f.name() for f in l.fields()], ['__rid__', '?column?', '?column? (2)'])
+
+        l = _get_layer('SELECT 1 as id, 2 as id')
+        self.assertEqual(l.fields().count(), 3)
+        self.assertEqual([f.name() for f in l.fields()], ['__rid__', 'id', 'id (2)'])
 
 
 if __name__ == '__main__':

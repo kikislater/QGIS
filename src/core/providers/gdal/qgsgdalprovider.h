@@ -55,12 +55,12 @@ int CPL_STDCALL progressCallback( double dfComplete,
 class QgsCoordinateTransform;
 
 /**
-
-  \brief Data provider for GDAL layers.
-
-  This provider implements the interface defined in the QgsDataProvider class
-  to provide access to spatial data residing in a GDAL layers.
-
+ *
+ * \brief Data provider for GDAL layers.
+ *
+ * This provider implements the interface defined in the QgsDataProvider class
+ * to provide access to spatial data residing in a GDAL layers.
+ *
 */
 class QgsGdalProvider final: public QgsRasterDataProvider, QgsGdalProviderBase
 {
@@ -367,7 +367,7 @@ class QgsGdalProviderMetadata final: public QgsProviderMetadata
     QgsGdalProviderMetadata();
     QVariantMap decodeUri( const QString &uri ) override;
     QString encodeUri( const QVariantMap &parts ) override;
-    QgsGdalProvider *createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options ) override;
+    QgsGdalProvider *createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options, QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags() ) override;
     QgsGdalProvider *createRasterDataProvider(
       const QString &uri,
       const QString &format,

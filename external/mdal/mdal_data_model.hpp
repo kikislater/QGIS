@@ -25,10 +25,10 @@ namespace MDAL
     BBox() {}
     BBox( double lx, double ux, double ly, double uy ): minX( lx ), maxX( ux ), minY( ly ), maxY( uy ) {}
 
-    double minX;
-    double maxX;
-    double minY;
-    double maxY;
+    double minX = std::numeric_limits<double>::max();
+    double maxX = -std::numeric_limits<double>::max();
+    double minY = std::numeric_limits<double>::max();
+    double maxY = -std::numeric_limits<double>::max();
   };
 
   typedef struct
@@ -266,6 +266,16 @@ namespace MDAL
       std::string uri() const;
       std::string crs() const;
       size_t faceVerticesMaximumCount() const;
+
+      virtual void closeSource() {};
+
+      virtual bool isEditable() const {return false;}
+
+      virtual void addVertices( size_t vertexCount, double *coordinates );
+      virtual void addFaces( size_t faceCount, size_t driverMaxVerticesPerFace, int *faceSizes, int *vertexIndices );
+
+    protected:
+      void setFaceVerticesMaximumCount( const size_t &faceVerticesMaximumCount );
 
     private:
       const std::string mDriverName;

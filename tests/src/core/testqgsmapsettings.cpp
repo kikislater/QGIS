@@ -543,18 +543,18 @@ void TestQgsMapSettings::testExpressionContext()
   r = e.evaluate( &c );
   QVERIFY( !r.isValid() );
 
-  ms.setTemporalRange( QgsDateTimeRange( QDateTime( QDate( 2002, 3, 4 ) ), QDateTime( QDate( 2010, 6, 7 ) ) ) );
+  ms.setTemporalRange( QgsDateTimeRange( QDateTime( QDate( 2002, 3, 4 ), QTime( 0, 0, 0 ) ), QDateTime( QDate( 2010, 6, 7 ), QTime( 0, 0, 0 ) ) ) );
   c = QgsExpressionContext();
   c << QgsExpressionContextUtils::mapSettingsScope( ms );
   e = QgsExpression( QStringLiteral( "@map_start_time" ) );
   r = e.evaluate( &c );
-  QCOMPARE( r.toDateTime(), QDateTime( QDate( 2002, 3, 4 ) ) );
+  QCOMPARE( r.toDateTime(), QDateTime( QDate( 2002, 3, 4 ), QTime( 0, 0, 0 ) ) );
   e = QgsExpression( QStringLiteral( "@map_end_time" ) );
   r = e.evaluate( &c );
-  QCOMPARE( r.toDateTime(), QDateTime( QDate( 2010, 6, 7 ) ) );
+  QCOMPARE( r.toDateTime(), QDateTime( QDate( 2010, 6, 7 ), QTime( 0, 0, 0 ) ) );
   e = QgsExpression( QStringLiteral( "@map_interval" ) );
   r = e.evaluate( &c );
-  QCOMPARE( r.value< QgsInterval >(), QgsInterval( QDateTime( QDate( 2010, 6, 7 ) ) - QDateTime( QDate( 2002, 3, 4 ) ) ) );
+  QCOMPARE( r.value< QgsInterval >(), QgsInterval( QDateTime( QDate( 2010, 6, 7 ), QTime( 0, 0, 0 ) ) - QDateTime( QDate( 2002, 3, 4 ), QTime( 0, 0, 0 ) ) ) );
 }
 
 void TestQgsMapSettings::testRenderedFeatureHandlers()
@@ -579,7 +579,7 @@ void TestQgsMapSettings::testCustomRenderingFlags()
   settings.setCustomRenderingFlag( QStringLiteral( "myexport" ), true );
   settings.setCustomRenderingFlag( QStringLiteral( "omitgeometries" ), QStringLiteral( "points" ) );
   QVERIFY( settings.customRenderingFlags()[ QStringLiteral( "myexport" ) ].toBool() == true );
-  QVERIFY( settings.customRenderingFlags()[ QStringLiteral( "omitgeometries" ) ].toString() == QStringLiteral( "points" ) );
+  QVERIFY( settings.customRenderingFlags()[ QStringLiteral( "omitgeometries" ) ].toString() == QLatin1String( "points" ) );
 
   // Test deprecated API
   Q_NOWARN_DEPRECATED_PUSH

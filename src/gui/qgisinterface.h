@@ -64,6 +64,8 @@ class QgsStatusBar;
 class QgsMeshLayer;
 class QgsBrowserGuiModel;
 class QgsDevToolWidgetFactory;
+class QgsGpsConnection;
+class QgsApplicationExitBlockerInterface;
 
 
 /**
@@ -848,6 +850,13 @@ class GUI_EXPORT QgisInterface : public QObject
     virtual void showOptionsDialog( QWidget *parent = nullptr, const QString &currentPage = QString() ) = 0;
 
     /**
+     * Opens the project properties dialog. The \a currentPage argument can be used to force
+     * the dialog to open at a specific page.
+     * \since QGIS 3.16
+     */
+    virtual void showProjectPropertiesDialog( const QString &currentPage = QString() ) = 0;
+
+    /**
      * Generate stylesheet
      * \param opts generated default option values, or a changed copy of them
      */
@@ -903,7 +912,7 @@ class GUI_EXPORT QgisInterface : public QObject
     /**
      * Add a dock widget to the given area and tabify it (if other dock widgets
      * exist in the same \a area). The new tab will be below other tabs unless
-     * \a raiseTab is passed as true.
+     * \a raiseTab is passed as TRUE.
      *
      * \a tabifyWith is a list of dock widget object names, ordered by
      * priority, with which the new dock widget should be tabified. Only the
@@ -984,6 +993,24 @@ class GUI_EXPORT QgisInterface : public QObject
     virtual void unregisterOptionsWidgetFactory( QgsOptionsWidgetFactory *factory ) = 0;
 
     /**
+     * Register a new tab in the project properties dialog.
+     * \note Ownership of the factory is not transferred, and the factory must
+     *       be unregistered when plugin is unloaded.
+     * \see QgsOptionsWidgetFactory
+     * \see unregisterProjectPropertiesWidgetFactory()
+     * \since QGIS 3.16
+     */
+    virtual void registerProjectPropertiesWidgetFactory( QgsOptionsWidgetFactory *factory ) = 0;
+
+    /**
+     * Unregister a previously registered tab in the options dialog.
+     * \see QgsOptionsWidgetFactory
+     * \see registerProjectPropertiesWidgetFactory()
+     * \since QGIS 3.16
+    */
+    virtual void unregisterProjectPropertiesWidgetFactory( QgsOptionsWidgetFactory *factory ) = 0;
+
+    /**
      * Register a new tool in the development/debugging tools dock.
      * \note Ownership of the factory is not transferred, and the factory must
      *       be unregistered when plugin is unloaded.
@@ -998,6 +1025,25 @@ class GUI_EXPORT QgisInterface : public QObject
      * \since QGIS 3.14
     */
     virtual void unregisterDevToolWidgetFactory( QgsDevToolWidgetFactory *factory ) = 0;
+
+    /**
+     * Register a new application exit blocker, which can be used to prevent the QGIS application
+     * from exiting while a plugin or script has unsaved changes.
+     *
+     * \note Ownership of \a blocker is not transferred, and the blocker must
+     *       be unregistered when plugin is unloaded.
+     *
+     * \see unregisterApplicationExitBlocker()
+     * \since QGIS 3.16
+     */
+    virtual void registerApplicationExitBlocker( QgsApplicationExitBlockerInterface *blocker ) = 0;
+
+    /**
+     * Unregister a previously registered application exit \a blocker.
+     * \see registerApplicationExitBlocker()
+     * \since QGIS 3.16
+    */
+    virtual void unregisterApplicationExitBlocker( QgsApplicationExitBlockerInterface *blocker ) = 0;
 
     /**
      * Register a new custom drop \a handler.
@@ -1071,7 +1117,7 @@ class GUI_EXPORT QgisInterface : public QObject
 
     /**
      * Opens a new feature form.
-     * Returns true if dialog was accepted (if shown modal, TRUE otherwise).
+     * Returns TRUE if dialog was accepted (if shown modal, TRUE otherwise).
      * \param l vector layer
      * \param f feature to show/modify
      * \param updateFeatureOnly only update the feature update (don't change any attributes of the layer) [UNUSED]
@@ -1157,6 +1203,16 @@ class GUI_EXPORT QgisInterface : public QObject
      */
     virtual QgsBrowserGuiModel *browserModel() = 0;
 
+    /**
+     * Sets a GPS \a connection to use within the GPS Panel widget.
+     *
+     * Any existing GPS connection used by the widget will be disconnect and replaced with this connection. The connection
+     * is automatically registered within the QgsApplication::gpsConnectionRegistry().
+     *
+     * \since QGIS 3.16
+     */
+    virtual void setGpsPanelConnection( QgsGpsConnection *connection ) = 0;
+
   signals:
 
     /**
@@ -1204,7 +1260,7 @@ class GUI_EXPORT QgisInterface : public QObject
     /**
      * Emitted when a project file is successfully read.
      * \note This is useful for plugins that store properties with project files.
-     *       A plugin can connect to this signal. When it is emitted, the plugin
+     *       A plugin can connect to this signal. When it is emitted the plugin
      *       knows to then check the project properties for any relevant state.
      */
     void projectRead();

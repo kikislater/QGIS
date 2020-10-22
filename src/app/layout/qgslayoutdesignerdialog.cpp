@@ -274,7 +274,10 @@ class QgsAtlasExportGuard
       mDialog->mIsExportingAtlas = false;
 
       // need to update the GUI to reflect the final atlas feature
-      mDialog->atlasFeatureChanged( mDialog->currentLayout()->reportContext().feature() );
+      if ( mDialog->currentLayout() )
+      {
+        mDialog->atlasFeatureChanged( mDialog->currentLayout()->reportContext().feature() );
+      }
     }
 
   private:
@@ -309,10 +312,8 @@ QgsLayoutDesignerDialog::QgsLayoutDesignerDialog( QWidget *parent, Qt::WindowFla
   //create layout view
   QGridLayout *viewLayout = new QGridLayout();
   viewLayout->setSpacing( 0 );
-  viewLayout->setMargin( 0 );
   viewLayout->setContentsMargins( 0, 0, 0, 0 );
   centralWidget()->layout()->setSpacing( 0 );
-  centralWidget()->layout()->setMargin( 0 );
   centralWidget()->layout()->setContentsMargins( 0, 0, 0, 0 );
 
   mMessageBar = new QgsMessageBar( centralWidget() );
@@ -4430,8 +4431,8 @@ bool QgsLayoutDesignerDialog::getPdfExportSettings( QgsLayoutExporter::PdfExport
     mLayout->setCustomProperty( QStringLiteral( "pdfSimplify" ), simplify ? 1 : 0 );
     mLayout->setCustomProperty( QStringLiteral( "pdfCreateGeoPdf" ), geoPdf ? 1 : 0 );
     mLayout->setCustomProperty( QStringLiteral( "pdfOgcBestPracticeFormat" ), useOgcBestPracticeFormat ? 1 : 0 );
-    mLayout->setCustomProperty( QStringLiteral( "pdfExportThemes" ), exportThemes.join( QStringLiteral( "~~~" ) ) );
-    mLayout->setCustomProperty( QStringLiteral( "pdfLayerOrder" ), geoPdfLayerOrder.join( QStringLiteral( "~~~" ) ) );
+    mLayout->setCustomProperty( QStringLiteral( "pdfExportThemes" ), exportThemes.join( QLatin1String( "~~~" ) ) );
+    mLayout->setCustomProperty( QStringLiteral( "pdfLayerOrder" ), geoPdfLayerOrder.join( QLatin1String( "~~~" ) ) );
     mLayout->setCustomProperty( QStringLiteral( "pdfLosslessImages" ), losslessImages ? 1 : 0 );
   }
 
@@ -4655,6 +4656,7 @@ void QgsLayoutDesignerDialog::toggleActions( bool layoutAvailable )
   mActionExportAsPDF->setEnabled( layoutAvailable );
   mActionExportAsSVG->setEnabled( layoutAvailable );
   mActionPrint->setEnabled( layoutAvailable );
+  mActionPrintReport->setEnabled( layoutAvailable );
   mActionCut->setEnabled( layoutAvailable );
   mActionCopy->setEnabled( layoutAvailable );
   mActionPaste->setEnabled( layoutAvailable );
@@ -4776,7 +4778,7 @@ void QgsLayoutDesignerDialog::setLastExportPath( const QString &path ) const
   QgsSettings().setValue( QStringLiteral( "lastLayoutExportDir" ), savePath, QgsSettings::App );
 }
 
-bool QgsLayoutDesignerDialog::checkBeforeExport()
+bool QgsLayoutDesignerDialog::checkBeforeExport( )
 {
   if ( mLayout )
   {

@@ -115,16 +115,29 @@ class CORE_EXPORT QgsMeshLayerUtils
      * \param mtp actual renderer map to pixel
      * \param outputSize actual renderer output size
      * \param bbox bounding box in map coordinates
-     * \param leftLim minimum x coordinate in pixel
-     * \param rightLim maximum x coordinate in pixel
-     * \param topLim minimum y coordinate in pixel
-     * \param bottomLim maximum y coordinate in pixel
+     * \param leftLim minimum x coordinate in pixel, clipped by 0
+     * \param rightLim maximum x coordinate in pixel, clipped by outputSize width
+     * \param bottomLim minimum y coordinate in pixel, clipped by 0
+     * \param topLim maximum y coordinate in pixel, clipped by outputSize height
      */
     static void boundingBoxToScreenRectangle(
       const QgsMapToPixel &mtp,
       const QSize &outputSize,
       const QgsRectangle &bbox,
-      int &leftLim, int &rightLim, int &topLim, int &bottomLim );
+      int &leftLim,
+      int &rightLim,
+      int &bottomLim,
+      int &topLim );
+
+    /**
+     * Transformes the bounding box to rectangle in screen coordinates (in pixels)
+     * \param mtp actual renderer map to pixel
+     * \param bbox bounding box in map coordinates
+     */
+    static QgsRectangle boundingBoxToScreenRectangle(
+      const QgsMapToPixel &mtp,
+      const QgsRectangle &bbox
+    );
 
     /**
     * Interpolates value based on known values on the vertices of a edge
@@ -274,7 +287,7 @@ class CORE_EXPORT QgsMeshLayerUtils
      * Calculates the normals on the vertices using vertical magnitudes instead Z value of vertices
      * \param triangularMesh the triangular mesh
      * \param verticalMagnitude the vertical magnitude values used instead Z value of vertices
-     * \param isRelative true if the vertical magnitude is relative to the Z value of vertices
+     * \param isRelative TRUE if the vertical magnitude is relative to the Z value of vertices
      * \returns normales (3D vector) on all the vertices
      * \since QGIS 3.14
      */

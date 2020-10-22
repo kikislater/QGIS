@@ -136,6 +136,7 @@ class CORE_EXPORT QgsVectorLayerExporter : public QgsFeatureSink
 
     bool addFeatures( QgsFeatureList &features, QgsFeatureSink::Flags flags = QgsFeatureSink::Flags() ) override;
     bool addFeature( QgsFeature &feature, QgsFeatureSink::Flags flags = QgsFeatureSink::Flags() ) override;
+    QString lastError() const override;
 
     /**
      * Finalizes the export and closes the new created layer.
@@ -162,6 +163,9 @@ class CORE_EXPORT QgsVectorLayerExporter : public QgsFeatureSink
     int mAttributeCount;
 
     QgsFeatureList mFeatureBuffer;
+    int mFeatureBufferMemoryUsage = 0;
+
+    bool mCreateSpatialIndex = true;
 
 #ifdef SIP_RUN
     QgsVectorLayerExporter( const QgsVectorLayerExporter &rh );

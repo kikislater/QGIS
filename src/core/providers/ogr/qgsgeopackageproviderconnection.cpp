@@ -164,10 +164,10 @@ void QgsGeoPackageProviderConnection::renameVectorTable( const QString &schema, 
   }
 }
 
-QList<QList<QVariant>> QgsGeoPackageProviderConnection::executeSql( const QString &sql ) const
+QList<QList<QVariant>> QgsGeoPackageProviderConnection::executeSql( const QString &sql, QgsFeedback *feedback ) const
 {
   checkCapability( Capability::ExecuteSql );
-  return executeGdalSqlPrivate( sql );
+  return executeGdalSqlPrivate( sql, feedback );
 }
 
 void QgsGeoPackageProviderConnection::vacuum( const QString &schema, const QString &name ) const
@@ -188,8 +188,29 @@ void QgsGeoPackageProviderConnection::createSpatialIndex( const QString &schema,
   {
     QgsMessageLog::logMessage( QStringLiteral( "Schema is not supported by GPKG, ignoring" ), QStringLiteral( "OGR" ), Qgis::Info );
   }
+
+  QString geometryColumnName { options.geometryColumnName };
+  if ( geometryColumnName.isEmpty() )
+  {
+    // Can we guess it?
+    try
+    {
+      const auto tp { table( schema, name ) };
+      geometryColumnName = tp.geometryColumn();
+    }
+    catch ( QgsProviderConnectionException & )
+    {
+      // pass
+    }
+  }
+
+  if ( geometryColumnName.isEmpty() )
+  {
+    throw QgsProviderConnectionException( QObject::tr( "Geometry column name not specified while creating spatial index" ) );
+  }
+
   executeGdalSqlPrivate( QStringLiteral( "SELECT CreateSpatialIndex(%1, %2)" ).arg( QgsSqliteUtils::quotedString( name ),
-                         QgsSqliteUtils::quotedString( ( options.geometryColumnName ) ) ) );
+                         QgsSqliteUtils::quotedString( ( geometryColumnName ) ) ) );
 }
 
 bool QgsGeoPackageProviderConnection::spatialIndexExists( const QString &schema, const QString &name, const QString &geometryColumn ) const
@@ -247,11 +268,11 @@ QList<QgsGeoPackageProviderConnection::TableProperty> QgsGeoPackageProviderConne
       static const QStringList aspatialTypes = { QStringLiteral( "attributes" ), QStringLiteral( "aspatial" ) };
       const QString dataType = row.at( 1 ).toString();
       // Table type
-      if ( dataType == QStringLiteral( "tiles" ) || dataType == QStringLiteral( "2d-gridded-coverage" ) )
+      if ( dataType == QLatin1String( "tiles" ) || dataType == QLatin1String( "2d-gridded-coverage" ) )
       {
         property.setFlag( QgsGeoPackageProviderConnection::Raster );
       }
-      else if ( dataType == QStringLiteral( "features" ) )
+      else if ( dataType == QLatin1String( "features" ) )
       {
         property.setFlag( QgsGeoPackageProviderConnection::Vector );
         property.setGeometryColumn( row.at( 5 ).toString() );
@@ -317,20 +338,41 @@ void QgsGeoPackageProviderConnection::setDefaultCapabilities()
     Capability::ExecuteSql,
     Capability::CreateSpatialIndex,
     Capability::SpatialIndexExists,
-    Capability::DeleteSpatialIndex
+    Capability::DeleteSpatialIndex,
+    Capability::DeleteField,
+    Capability::AddField
   };
 #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION(2,4,0)
   mCapabilities |= Capability::DropRasterTable;
 #endif
+  mGeometryColumnCapabilities =
+  {
+    GeometryColumnCapability::Z,
+    GeometryColumnCapability::M,
+    GeometryColumnCapability::SinglePart,
+    GeometryColumnCapability::Curves
+  };
 }
 
-QList<QVariantList> QgsGeoPackageProviderConnection::executeGdalSqlPrivate( const QString &sql ) const
+QList<QVariantList> QgsGeoPackageProviderConnection::executeGdalSqlPrivate( const QString &sql, QgsFeedback *feedback ) const
 {
-  QString errCause;
   QList<QVariantList> results;
+
+  if ( feedback && feedback->isCanceled() )
+  {
+    return results;
+  }
+
+  QString errCause;
   gdal::ogr_datasource_unique_ptr hDS( GDALOpenEx( uri().toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr ) );
   if ( hDS )
   {
+
+    if ( feedback && feedback->isCanceled() )
+    {
+      return results;
+    }
+
     OGRLayerH ogrLayer( GDALDatasetExecuteSQL( hDS.get(), sql.toUtf8().constData(), nullptr, nullptr ) );
     if ( ogrLayer )
     {
@@ -338,12 +380,20 @@ QList<QVariantList> QgsGeoPackageProviderConnection::executeGdalSqlPrivate( cons
       QgsFields fields;
       while ( fet.reset( OGR_L_GetNextFeature( ogrLayer ) ), fet )
       {
+
+        if ( feedback && feedback->isCanceled() )
+        {
+          break;
+        }
+
         QVariantList row;
+
         // Try to get the right type for the returned values
         if ( fields.isEmpty() )
         {
           fields = QgsOgrUtils::readOgrFields( fet.get(), QTextCodec::codecForName( "UTF-8" ) );
         }
+
         if ( ! fields.isEmpty() )
         {
           QgsFeature f { QgsOgrUtils::readOgrFeature( fet.get(), fields, QTextCodec::codecForName( "UTF-8" ) ) };
@@ -378,3 +428,19 @@ QList<QVariantList> QgsGeoPackageProviderConnection::executeGdalSqlPrivate( cons
   return results;
 }
 
+
+QList<QgsVectorDataProvider::NativeType> QgsGeoPackageProviderConnection::nativeTypes() const
+{
+  QList<QgsVectorDataProvider::NativeType> types;
+  QgsVectorLayer::LayerOptions options { false, true };
+  options.skipCrsValidation = true;
+  const QgsVectorLayer vl { uri(), QStringLiteral( "temp_layer" ), QStringLiteral( "ogr" ), options };
+  if ( ! vl.isValid() || ! vl.dataProvider() )
+  {
+    const QString errorCause { vl.dataProvider() &&vl.dataProvider()->hasErrors() ?
+                               vl.dataProvider()->errors().join( '\n' ) :
+                               QObject::tr( "unknown error" ) };
+    throw QgsProviderConnectionException( QObject::tr( "Error retrieving native types for %1: %2" ).arg( uri() ).arg( errorCause ) );
+  }
+  return vl.dataProvider()->nativeTypes();
+}

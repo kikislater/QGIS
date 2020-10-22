@@ -1,6 +1,6 @@
 #############################################################
 # CMake settings
-CMAKE_MINIMUM_REQUIRED(VERSION 3.1.0)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.10.0)
 SET(CMAKE_COLOR_MAKEFILE ON)
 SET(CMAKE_AUTORCC ON)
 # set path to additional CMake modules
@@ -410,7 +410,8 @@ IF(WITH_CORE)
 
   # get the Qt plugins directory
   GET_TARGET_PROPERTY(QMAKE_EXECUTABLE Qt5::qmake LOCATION)
-  EXEC_PROGRAM(${QMAKE_EXECUTABLE} ARGS "-query QT_INSTALL_PLUGINS" RETURN_VALUE return_code OUTPUT_VARIABLE QT_PLUGINS_DIR )
+  EXEC_PROGRAM(${QMAKE_EXECUTABLE} ARGS "-query QT_INSTALL_PLUGINS" RETURN_VALUE return_code OUTPUT_VARIABLE DEFAULT_QT_PLUGINS_DIR )
+  SET (QT_PLUGINS_DIR ${DEFAULT_QT_PLUGINS_DIR} CACHE STRING "Path to installation directory for Qt Plugins. Defaults to Qt native plugin directory")
 
   MESSAGE(STATUS "Found Qt version: ${Qt5Core_VERSION_STRING}")
   IF (WITH_QUICK)
@@ -571,7 +572,7 @@ IF (PEDANTIC)
     # ADD_DEFINITIONS( -fstrict-aliasing -Wstrict-aliasing=1 -Wredundant-decls )
 
     IF ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-return-type-c-linkage -Wno-overloaded-virtual -Wimplicit-fallthrough")
+       SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-return-type-c-linkage -Wno-overloaded-virtual -Wimplicit-fallthrough")
     ENDIF ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
 
     # add any extra CXXFLAGS flags set by user. can be -D CXX_EXTRA_FLAGS or environment variable
@@ -622,6 +623,9 @@ ENDIF(MSVC)
 ADD_DEFINITIONS(-DQT_DEPRECATED_WARNINGS)
 # Unfortunately Qwt uses deprecated QString::null in headers, preventing this being raised above 5.8
 ADD_DEFINITIONS(-DQT_DISABLE_DEPRECATED_BEFORE=0x050800)
+
+# For fast string concatenation
+ADD_DEFINITIONS(-DQT_USE_QSTRINGBUILDER)
 
 IF (WITH_GEOREFERENCER)
   FIND_PACKAGE(GSL REQUIRED)
@@ -870,7 +874,7 @@ IF (WITH_CORE AND WITH_BINDINGS)
   INCLUDE(SIPMacros)
 
   SET(SIP_INCLUDES ${PYQT_SIP_DIR} ${CMAKE_SOURCE_DIR}/python)
-  SET(SIP_CONCAT_PARTS 6)
+  SET(SIP_CONCAT_PARTS 11)
 
   IF (NOT BINDINGS_GLOBAL_INSTALL)
     SET(PYTHON_SITE_PACKAGES_DIR ${QGIS_DATA_DIR}/python)

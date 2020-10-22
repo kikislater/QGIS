@@ -369,29 +369,43 @@ bool QgsGeometryCollection::fromWkt( const QString &wkt )
                             << new QgsMultiCurve << new QgsMultiSurface, QStringLiteral( "GeometryCollection" ) );
 }
 
-QByteArray QgsGeometryCollection::asWkb( WkbFlags flags ) const
+int QgsGeometryCollection::wkbSize( QgsAbstractGeometry::WkbFlags flags ) const
 {
   int binarySize = sizeof( char ) + sizeof( quint32 ) + sizeof( quint32 );
-  QVector<QByteArray> wkbForGeometries;
   for ( const QgsAbstractGeometry *geom : mGeometries )
   {
     if ( geom )
     {
-      QByteArray wkb( geom->asWkb( flags ) );
-      binarySize += wkb.length();
-      wkbForGeometries << wkb;
+      binarySize += geom->wkbSize( flags );
+    }
+  }
+
+  return binarySize;
+}
+
+QByteArray QgsGeometryCollection::asWkb( WkbFlags flags ) const
+{
+  int countNonNull = 0;
+  for ( const QgsAbstractGeometry *geom : mGeometries )
+  {
+    if ( geom )
+    {
+      countNonNull ++;
     }
   }
 
   QByteArray wkbArray;
-  wkbArray.resize( binarySize );
+  wkbArray.resize( QgsGeometryCollection::wkbSize( flags ) );
   QgsWkbPtr wkb( wkbArray );
   wkb << static_cast<char>( QgsApplication::endian() );
   wkb << static_cast<quint32>( wkbType() );
-  wkb << static_cast<quint32>( wkbForGeometries.count() );
-  for ( const QByteArray &wkbForGeometry : qgis::as_const( wkbForGeometries ) )
+  wkb << static_cast<quint32>( countNonNull );
+  for ( const QgsAbstractGeometry *geom : mGeometries )
   {
-    wkb << wkbForGeometry;
+    if ( geom )
+    {
+      wkb << geom->asWkb( flags );
+    }
   }
   return wkbArray;
 }
@@ -401,7 +415,7 @@ QString QgsGeometryCollection::asWkt( int precision ) const
   QString wkt = wktTypeStr();
 
   if ( isEmpty() )
-    wkt += QStringLiteral( " EMPTY" );
+    wkt += QLatin1String( " EMPTY" );
   else
   {
     wkt += QLatin1String( " (" );
@@ -698,7 +712,10 @@ bool QgsGeometryCollection::fromCollectionWkt( const QString &wkt, const QVector
   }
   mWkbType = parts.first;
 
-  if ( parts.second.compare( QLatin1String( "EMPTY" ), Qt::CaseInsensitive ) == 0 )
+  QString secondWithoutParentheses = parts.second;
+  secondWithoutParentheses = secondWithoutParentheses.remove( '(' ).remove( ')' ).simplified().remove( ' ' );
+  if ( ( parts.second.compare( QLatin1String( "EMPTY" ), Qt::CaseInsensitive ) == 0 ) ||
+       secondWithoutParentheses.isEmpty() )
     return true;
 
   QString defChildWkbType = QStringLiteral( "%1%2%3 " ).arg( defaultChildWkbType, is3D() ? QStringLiteral( "Z" ) : QString(), isMeasure() ? QStringLiteral( "M" ) : QString() );

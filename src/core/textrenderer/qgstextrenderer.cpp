@@ -79,7 +79,8 @@ void QgsTextRenderer::drawText( const QRectF &rect, double rotation, QgsTextRend
     tmpFormat.updateDataDefinedProperties( context );
   tmpFormat = updateShadowPosition( tmpFormat );
 
-  const QgsTextDocument document = format.allowHtmlFormatting() ? QgsTextDocument::fromHtml( textLines ) : QgsTextDocument::fromPlainText( textLines );
+  QgsTextDocument document = format.allowHtmlFormatting() ? QgsTextDocument::fromHtml( textLines ) : QgsTextDocument::fromPlainText( textLines );
+  document.applyCapitalization( format.capitalization() );
 
   if ( tmpFormat.background().enabled() )
   {
@@ -101,7 +102,8 @@ void QgsTextRenderer::drawText( QPointF point, double rotation, QgsTextRenderer:
     tmpFormat.updateDataDefinedProperties( context );
   tmpFormat = updateShadowPosition( tmpFormat );
 
-  const QgsTextDocument document = format.allowHtmlFormatting() ? QgsTextDocument::fromHtml( textLines ) : QgsTextDocument::fromPlainText( textLines );
+  QgsTextDocument document = format.allowHtmlFormatting() ? QgsTextDocument::fromHtml( textLines ) : QgsTextDocument::fromPlainText( textLines );
+  document.applyCapitalization( format.capitalization() );
 
   if ( tmpFormat.background().enabled() )
   {
@@ -329,7 +331,11 @@ double QgsTextRenderer::drawBuffer( QgsRenderContext &context, const QgsTextRend
         const QStringList parts = QgsPalLabeling::splitToGraphemes( fragment.text() );
         for ( const QString &part : parts )
         {
+#if QT_VERSION < QT_VERSION_CHECK(5, 11, 0)
           double partXOffset = ( labelWidth - ( fragmentMetrics.width( part ) - letterSpacing ) ) / 2;
+#else
+          double partXOffset = ( labelWidth - ( fragmentMetrics.horizontalAdvance( part ) - letterSpacing ) ) / 2;
+#endif
           path.addText( partXOffset, partYOffset, fragmentFont, part );
           partYOffset += fragmentMetrics.ascent() + letterSpacing;
         }
@@ -358,8 +364,9 @@ double QgsTextRenderer::drawBuffer( QgsRenderContext &context, const QgsTextRend
   if ( buffer.paintEffect() && buffer.paintEffect()->enabled() )
   {
     context.setPainter( &buffp );
+    std::unique_ptr< QgsPaintEffect > tmpEffect( buffer.paintEffect()->clone() );
 
-    buffer.paintEffect()->begin( context );
+    tmpEffect->begin( context );
     context.painter()->setPen( pen );
     context.painter()->setBrush( tmpColor );
     if ( scaleFactor != 1.0 )
@@ -367,7 +374,7 @@ double QgsTextRenderer::drawBuffer( QgsRenderContext &context, const QgsTextRend
     context.painter()->drawPath( path );
     if ( scaleFactor != 1.0 )
       context.painter()->scale( scaleFactor, scaleFactor );
-    buffer.paintEffect()->end( context );
+    tmpEffect->end( context );
 
     context.setPainter( p );
   }
@@ -488,14 +495,17 @@ void QgsTextRenderer::drawMask( QgsRenderContext &context, const QgsTextRenderer
 
 double QgsTextRenderer::textWidth( const QgsRenderContext &context, const QgsTextFormat &format, const QStringList &textLines, QFontMetricsF * )
 {
+  QgsTextDocument doc;
   if ( !format.allowHtmlFormatting() )
   {
-    return textWidth( context, format, QgsTextDocument::fromPlainText( textLines ) );
+    doc = QgsTextDocument::fromPlainText( textLines );
   }
   else
   {
-    return textWidth( context, format, QgsTextDocument::fromHtml( textLines ) );
+    doc = QgsTextDocument::fromHtml( textLines );
   }
+  doc.applyCapitalization( format.capitalization() );
+  return textWidth( context, format, doc );
 }
 
 double QgsTextRenderer::textWidth( const QgsRenderContext &context, const QgsTextFormat &format, const QgsTextDocument &document )
@@ -599,8 +609,11 @@ double QgsTextRenderer::textHeight( const QgsRenderContext &context, const QgsTe
   return height + maxExtension;
 }
 
-double QgsTextRenderer::textHeight( const QgsRenderContext &context, const QgsTextFormat &format, const QgsTextDocument &document, DrawMode mode )
+double QgsTextRenderer::textHeight( const QgsRenderContext &context, const QgsTextFormat &format, const QgsTextDocument &doc, DrawMode mode )
 {
+  QgsTextDocument document = doc;
+  document.applyCapitalization( format.capitalization() );
+
   //calculate max height of text lines
   const double scaleFactor = ( context.flags() & QgsRenderContext::ApplyScalingWorkaroundForTextRendering ) ? FONT_WORKAROUND_SCALE : 1.0;
 
@@ -612,10 +625,12 @@ double QgsTextRenderer::textHeight( const QgsRenderContext &context, const QgsTe
     {
       int blockIndex = 0;
       double totalHeight = 0;
+      double lastLineLeading = 0;
       for ( const QgsTextBlock &block : document )
       {
         double maxBlockHeight = 0;
         double maxBlockLineSpacing = 0;
+        double maxBlockLeading = 0;
         for ( const QgsTextFragment &fragment : block )
         {
           QFont fragmentFont = baseFont;
@@ -625,7 +640,11 @@ double QgsTextRenderer::textHeight( const QgsRenderContext &context, const QgsTe
           const double fragmentHeight = fm.ascent() + fm.descent(); // ignore +1 for baseline
 
           maxBlockHeight = std::max( maxBlockHeight, fragmentHeight );
-          maxBlockLineSpacing = std::max( maxBlockLineSpacing, fm.lineSpacing() );
+          if ( fm.lineSpacing() > maxBlockLineSpacing )
+          {
+            maxBlockLineSpacing = fm.lineSpacing();
+            maxBlockLeading = fm.leading();
+          }
         }
 
         switch ( mode )
@@ -641,13 +660,15 @@ double QgsTextRenderer::textHeight( const QgsRenderContext &context, const QgsTe
           case Point:
             // standard rendering - designed to exactly replicate QPainter's drawText method
             totalHeight += blockIndex == 0 ? maxBlockHeight : maxBlockLineSpacing * format.lineHeight();
+            if ( blockIndex > 0 )
+              lastLineLeading = maxBlockLeading;
             break;
         }
 
         blockIndex++;
       }
 
-      return totalHeight / scaleFactor;
+      return ( totalHeight - lastLineLeading ) / scaleFactor;
     }
 
     case QgsTextFormat::VerticalOrientation:
@@ -692,9 +713,11 @@ void QgsTextRenderer::drawBackground( QgsRenderContext &context, QgsTextRenderer
 
   QPainter *prevP = context.painter();
   QPainter *p = context.painter();
+  std::unique_ptr< QgsPaintEffect > tmpEffect;
   if ( background.paintEffect() && background.paintEffect()->enabled() )
   {
-    background.paintEffect()->begin( context );
+    tmpEffect.reset( background.paintEffect()->clone() );
+    tmpEffect->begin( context );
     p = context.painter();
   }
 
@@ -1054,9 +1077,9 @@ void QgsTextRenderer::drawBackground( QgsRenderContext &context, QgsTextRenderer
     }
   }
 
-  if ( background.paintEffect() && background.paintEffect()->enabled() )
+  if ( tmpEffect )
   {
-    background.paintEffect()->end( context );
+    tmpEffect->end( context );
     context.setPainter( prevP );
   }
 }
@@ -1339,7 +1362,11 @@ void QgsTextRenderer::drawTextInternalHorizontal( QgsRenderContext &context, con
     case Point:
       for ( const QString &line : textLines )
       {
+#if QT_VERSION < QT_VERSION_CHECK(5, 11, 0)
         double labelWidth = fontMetrics->width( line ) / fontScale;
+#else
+        double labelWidth = fontMetrics->horizontalAdvance( line ) / fontScale;
+#endif
         if ( labelWidth > labelWidest )
         {
           labelWidest = labelWidth;
@@ -1404,7 +1431,11 @@ void QgsTextRenderer::drawTextInternalHorizontal( QgsRenderContext &context, con
 
     // figure x offset for horizontal alignment of multiple lines
     double xMultiLineOffset = 0.0;
+#if QT_VERSION < QT_VERSION_CHECK(5, 11, 0)
     double labelWidth = fontMetrics->width( line ) / fontScale;
+#else
+    double labelWidth = fontMetrics->horizontalAdvance( line ) / fontScale;
+#endif
     double extraWordSpace = 0;
     double extraLetterSpace = 0;
     if ( adjustForAlignment )
@@ -1759,7 +1790,11 @@ void QgsTextRenderer::drawTextInternalVertical( QgsRenderContext &context, const
         double partYOffset = 0.0;
         for ( const auto &part : parts )
         {
+#if QT_VERSION < QT_VERSION_CHECK(5, 11, 0)
           double partXOffset = ( labelWidth - ( fragmentMetrics.width( part ) / fontScale - letterSpacing ) ) / 2;
+#else
+          double partXOffset = ( labelWidth - ( fragmentMetrics.horizontalAdvance( part ) / fontScale - letterSpacing ) ) / 2;
+#endif
           path.addText( partXOffset * fontScale, partYOffset * fontScale, fragmentFont, part );
           partYOffset += fragmentMetrics.ascent() / fontScale + letterSpacing;
         }
@@ -1823,7 +1858,11 @@ void QgsTextRenderer::drawTextInternalVertical( QgsRenderContext &context, const
             double partYOffset = 0.0;
             for ( const QString &part : parts )
             {
+#if QT_VERSION < QT_VERSION_CHECK(5, 11, 0)
               double partXOffset = ( labelWidth - ( fragmentMetrics.width( part ) / fontScale - letterSpacing ) ) / 2;
+#else
+              double partXOffset = ( labelWidth - ( fragmentMetrics.horizontalAdvance( part ) / fontScale - letterSpacing ) ) / 2;
+#endif
               context.painter()->scale( 1 / fontScale, 1 / fontScale );
               context.painter()->drawText( partXOffset * fontScale, ( fragmentYOffset + partYOffset ) * fontScale, part );
               context.painter()->scale( fontScale, fontScale );

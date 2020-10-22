@@ -32,7 +32,7 @@ void QgsFixAttributeDialog::init( QgsVectorLayer *layer, const QgsAttributeEdito
 {
   setWindowTitle( tr( "%1 - Fix Pasted Features" ).arg( layer->name() ) );
   setLayout( new QGridLayout() );
-  layout()->setMargin( 0 );
+  layout()->setContentsMargins( 0, 0, 0, 0 );
 
   mUnfixedFeatures = mFeatures;
   mCurrentFeature = mFeatures.begin();
@@ -52,7 +52,7 @@ void QgsFixAttributeDialog::init( QgsVectorLayer *layer, const QgsAttributeEdito
   infoLayout->addWidget( mProgressBar );
   QgsFeature feature;
   mAttributeForm = new QgsAttributeForm( layer, *mCurrentFeature, context, this );
-  mAttributeForm->setMode( QgsAttributeEditorContext::SingleEditMode );
+  mAttributeForm->setMode( QgsAttributeEditorContext::FixAttributeMode );
   mAttributeForm->disconnectButtonBox();
   layout()->addWidget( mAttributeForm );
 

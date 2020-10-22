@@ -220,9 +220,21 @@ double QgsLayoutUtils::textWidthMM( const QFont &font, const QString &text )
 {
   //upscale using FONT_WORKAROUND_SCALE
   //ref: http://osgeo-org.1560.x6.nabble.com/Multi-line-labels-and-font-bug-td4157152.html
+
+  const QStringList multiLineSplit = text.split( '\n' );
   QFont metricsFont = scaledFontPixelSize( font );
   QFontMetricsF fontMetrics( metricsFont );
-  return ( fontMetrics.width( text ) / FONT_WORKAROUND_SCALE );
+
+  double maxWidth = 0;
+  for ( const QString &line : multiLineSplit )
+  {
+#if QT_VERSION < QT_VERSION_CHECK(5, 11, 0)
+    maxWidth = std::max( maxWidth, ( fontMetrics.width( line ) / FONT_WORKAROUND_SCALE ) );
+#else
+    maxWidth = std::max( maxWidth, ( fontMetrics.horizontalAdvance( line ) / FONT_WORKAROUND_SCALE ) );
+#endif
+  }
+  return maxWidth;
 }
 
 double QgsLayoutUtils::textHeightMM( const QFont &font, const QString &text, double multiLineHeight )
@@ -459,6 +471,22 @@ double QgsLayoutUtils::calculatePrettySize( const double minimumSize, const doub
     // Pick size from {lowerNiceUnitsPerSeg, upperNiceUnitsPerSeg}, use the larger if possible
     return upperNiceUnitsPerSeg < minimumSize ? lowerNiceUnitsPerSeg : upperNiceUnitsPerSeg;
   }
+}
+
+bool QgsLayoutUtils::itemIsAClippingSource( const QgsLayoutItem *item )
+{
+  if ( !( item->itemFlags() & QgsLayoutItem::FlagProvidesClipPath ) )
+    return false; // not a clipping provider, so shortcut out
+
+  // current only maps can be clipped
+  QList< QgsLayoutItemMap * > maps;
+  item->layout()->layoutItems( maps );
+  for ( QgsLayoutItemMap *map : qgis::as_const( maps ) )
+  {
+    if ( map->itemClippingSettings()->isActive() && map->itemClippingSettings()->sourceItem() == item )
+      return true;
+  }
+  return false;
 }
 
 double QgsLayoutUtils::pointsToMM( const double pointSize )

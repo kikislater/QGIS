@@ -44,7 +44,10 @@
 #include "qgs3dmaptoolmeasureline.h"
 #include "qgs3dutils.h"
 
-
+#include "qgs3dsceneexporter.h"
+#include "qgsabstract3drenderer.h"
+#include "qgsmap3dexportwidget.h"
+#include "qgs3dmapexportsettings.h"
 
 Qgs3DMapCanvasDockWidget::Qgs3DMapCanvasDockWidget( QWidget *parent )
   : QgsDockWidget( parent )
@@ -99,6 +102,9 @@ Qgs3DMapCanvasDockWidget::Qgs3DMapCanvasDockWidget( QWidget *parent )
   toolBar->addAction( QgsApplication::getThemeIcon( QStringLiteral( "mActionSaveMapAsImage.svg" ) ),
                       tr( "Save as Image…" ), this, &Qgs3DMapCanvasDockWidget::saveAsImage );
 
+  toolBar->addAction( QgsApplication::getThemeIcon( QStringLiteral( "3d.svg" ) ),
+                      tr( "Export 3D Scene" ), this, &Qgs3DMapCanvasDockWidget::exportScene );
+
   toolBar->addSeparator();
 
   // Map Theme Menu
@@ -117,7 +123,6 @@ Qgs3DMapCanvasDockWidget::Qgs3DMapCanvasDockWidget( QWidget *parent )
 
   toolBar->addAction( QgsApplication::getThemeIcon( QStringLiteral( "mActionOptions.svg" ) ),
                       tr( "Configure…" ), this, &Qgs3DMapCanvasDockWidget::configure );
-
 
   mCanvas = new Qgs3DMapCanvas( contentsWidget );
   mCanvas->setMinimumSize( QSize( 200, 200 ) );
@@ -247,53 +252,94 @@ void Qgs3DMapCanvasDockWidget::resetView()
 
 void Qgs3DMapCanvasDockWidget::configure()
 {
-  QDialog dlg;
+  QDialog dlg( this );
   dlg.setWindowTitle( tr( "3D Configuration" ) );
   dlg.setObjectName( QStringLiteral( "3DConfigurationDialog" ) );
-  dlg.setMinimumSize( 380, 460 );
+  dlg.setMinimumSize( 600, 460 );
   QgsGui::instance()->enableAutoGeometryRestore( &dlg );
 
   Qgs3DMapSettings *map = mCanvas->map();
   Qgs3DMapConfigWidget *w = new Qgs3DMapConfigWidget( map, mMainCanvas, &dlg );
-  QDialogButtonBox *buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Help, &dlg );
+  QDialogButtonBox *buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel | QDialogButtonBox::Help, &dlg );
+
+  auto applyConfig = [ = ]()
+  {
+    QgsVector3D oldOrigin = map->origin();
+    QgsCoordinateReferenceSystem oldCrs = map->crs();
+    QgsCameraPose oldCameraPose = mCanvas->cameraController()->cameraPose();
+    QgsVector3D oldLookingAt = oldCameraPose.centerPoint();
+
+    // update map
+    w->apply();
+
+    QgsVector3D p = Qgs3DUtils::transformWorldCoordinates(
+                      oldLookingAt,
+                      oldOrigin, oldCrs,
+                      map->origin(), map->crs(), QgsProject::instance()->transformContext() );
+
+    if ( p != oldLookingAt )
+    {
+      // apply() call has moved origin of the world so let's move camera so we look still at the same place
+      QgsCameraPose newCameraPose = oldCameraPose;
+      newCameraPose.setCenterPoint( p );
+      mCanvas->cameraController()->setCameraPose( newCameraPose );
+    }
+
+    // Disable map theme button if the terrain generator is a mesh
+    mBtnMapThemes->setDisabled( map->terrainGenerator()->type() == QgsTerrainGenerator::Mesh );
+  };
+
   connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );
   connect( buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
-  connect( buttons, &QDialogButtonBox::helpRequested, w, []() { QgsHelp::openHelp( QStringLiteral( "introduction/qgis_gui.html#d-map-view" ) ); } );
+  connect( buttons, &QDialogButtonBox::clicked, &dlg, [ = ]( QAbstractButton * button )
+  {
+    if ( buttons->buttonRole( button ) == QDialogButtonBox::ApplyRole )
+      applyConfig();
+  } );
+  connect( buttons, &QDialogButtonBox::helpRequested, w, []() { QgsHelp::openHelp( QStringLiteral( "introduction/qgis_gui.html#scene-configuration" ) ); } );
+
+  connect( w, &Qgs3DMapConfigWidget::isValidChanged, this, [ = ]( bool valid )
+  {
+    buttons->button( QDialogButtonBox::Ok )->setEnabled( valid );
+  } );
 
   QVBoxLayout *layout = new QVBoxLayout( &dlg );
   layout->addWidget( w, 1 );
   layout->addWidget( buttons );
+
   if ( !dlg.exec() )
     return;
+  applyConfig();
+}
 
-  QgsVector3D oldOrigin = map->origin();
-  QgsCoordinateReferenceSystem oldCrs = map->crs();
-  QgsCameraPose oldCameraPose = mCanvas->cameraController()->cameraPose();
-  QgsVector3D oldLookingAt = oldCameraPose.centerPoint();
+void Qgs3DMapCanvasDockWidget::exportScene()
+{
 
-  // update map
-  w->apply();
+  QDialog dlg;
+  dlg.setWindowTitle( tr( "Export 3D Scene" ) );
+  dlg.setObjectName( QStringLiteral( "3DSceneExportDialog" ) );
+  QgsGui::instance()->enableAutoGeometryRestore( &dlg );
 
-  QgsVector3D p = Qgs3DUtils::transformWorldCoordinates(
-                    oldLookingAt,
-                    oldOrigin, oldCrs,
-                    map->origin(), map->crs(), QgsProject::instance()->transformContext() );
+  Qgs3DMapExportSettings exportSettings;
+  QgsMap3DExportWidget w( mCanvas->scene(), &exportSettings );
 
-  if ( p != oldLookingAt )
-  {
-    // apply() call has moved origin of the world so let's move camera so we look still at the same place
-    QgsCameraPose newCameraPose = oldCameraPose;
-    newCameraPose.setCenterPoint( p );
-    mCanvas->cameraController()->setCameraPose( newCameraPose );
-  }
+  QDialogButtonBox *buttons = new QDialogButtonBox( QDialogButtonBox::Cancel | QDialogButtonBox::Help | QDialogButtonBox::Ok, &dlg );
 
-  // Disable map theme button if the terrain generator is a mesh
-  mBtnMapThemes->setDisabled( map->terrainGenerator()->type() == QgsTerrainGenerator::Mesh );
+  connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );
+  connect( buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject );
+  connect( buttons, &QDialogButtonBox::helpRequested, &dlg, [ = ] { QgsHelp::openHelp( QStringLiteral( "introduction/qgis_gui.html#d-map-view" ) ); } );
+
+  QVBoxLayout *layout = new QVBoxLayout( &dlg );
+  layout->addWidget( &w, 1 );
+  layout->addWidget( buttons );
+  if ( dlg.exec() )
+    w.exportScene();
 }
 
 void Qgs3DMapCanvasDockWidget::onMainCanvasLayersChanged()
 {
   mCanvas->map()->setLayers( mMainCanvas->layers() );
+  mCanvas->map()->setTerrainLayers( mMainCanvas->layers() );
 }
 
 void Qgs3DMapCanvasDockWidget::onMainCanvasColorChanged()

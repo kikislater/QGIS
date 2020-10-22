@@ -75,6 +75,13 @@ Remove all vertices, edges and faces
 .. versionadded:: 3.14
 %End
 
+  static bool compareFaces( const QgsMeshFace &face1, const QgsMeshFace &face2 );
+%Docstring
+Compare two faces, return ``True`` if they are equivalent : same indexes and same clock wise
+
+.. versionadded:: 3.16
+%End
+
 };
 
 class QgsMeshDataSourceInterface /Abstract/
@@ -386,7 +393,9 @@ Responsible for reading native mesh data
 #include "qgsmeshdataprovider.h"
 %End
   public:
-    QgsMeshDataProvider( const QString &uri, const QgsDataProvider::ProviderOptions &providerOptions );
+    QgsMeshDataProvider( const QString &uri,
+                         const QgsDataProvider::ProviderOptions &providerOptions,
+                         QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags() );
 %Docstring
 Ctor
 %End

@@ -69,6 +69,7 @@ QgsRenderContext::QgsRenderContext( const QgsRenderContext &rh )
   , mDisabledSymbolLayers()
   , mClippingRegions( rh.mClippingRegions )
   , mFeatureClipGeometry( rh.mFeatureClipGeometry )
+  , mTextureOrigin( rh.mTextureOrigin )
 #ifdef QGISDEBUG
   , mHasTransformContext( rh.mHasTransformContext )
 #endif
@@ -104,6 +105,7 @@ QgsRenderContext &QgsRenderContext::operator=( const QgsRenderContext &rh )
   mCustomRenderingFlags = rh.mCustomRenderingFlags;
   mClippingRegions = rh.mClippingRegions;
   mFeatureClipGeometry = rh.mFeatureClipGeometry;
+  mTextureOrigin = rh.mTextureOrigin;
   setIsTemporal( rh.isTemporal() );
   if ( isTemporal() )
     setTemporalRange( rh.temporalRange() );
@@ -214,6 +216,7 @@ QgsRenderContext QgsRenderContext::fromMapSettings( const QgsMapSettings &mapSet
   ctx.setFlag( RenderPreviewJob, mapSettings.testFlag( QgsMapSettings::RenderPreviewJob ) );
   ctx.setFlag( RenderBlocking, mapSettings.testFlag( QgsMapSettings::RenderBlocking ) );
   ctx.setFlag( LosslessImageRendering, mapSettings.testFlag( QgsMapSettings::LosslessImageRendering ) );
+  ctx.setFlag( Render3DMap, mapSettings.testFlag( QgsMapSettings::Render3DMap ) );
   ctx.setScaleFactor( mapSettings.outputDpi() / 25.4 ); // = pixels per mm
   ctx.setRendererScale( mapSettings.scale() );
   ctx.setExpressionContext( mapSettings.expressionContext() );
@@ -532,6 +535,16 @@ QgsGeometry QgsRenderContext::featureClipGeometry() const
 void QgsRenderContext::setFeatureClipGeometry( const QgsGeometry &geometry )
 {
   mFeatureClipGeometry = geometry;
+}
+
+QPointF QgsRenderContext::textureOrigin() const
+{
+  return mTextureOrigin;
+}
+
+void QgsRenderContext::setTextureOrigin( const QPointF &origin )
+{
+  mTextureOrigin = origin;
 }
 
 

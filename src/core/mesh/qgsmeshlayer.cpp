@@ -36,13 +36,14 @@
 #include "qgsstyle.h"
 #include "qgstriangularmesh.h"
 #include "qgsmesh3daveraging.h"
+#include "qgslayermetadataformatter.h"
 
 QgsMeshLayer::QgsMeshLayer( const QString &meshLayerPath,
                             const QString &baseName,
                             const QString &providerKey,
                             const QgsMeshLayer::LayerOptions &options )
   : QgsMapLayer( QgsMapLayerType::MeshLayer, baseName, meshLayerPath ),
-    mDatasetGroupStore( new QgsMeshDatasetGroupStore ),
+    mDatasetGroupStore( new QgsMeshDatasetGroupStore( this ) ),
     mTemporalProperties( new QgsMeshLayerTemporalProperties( this ) )
 
 {
@@ -54,7 +55,12 @@ QgsMeshLayer::QgsMeshLayer( const QString &meshLayerPath,
   if ( !meshLayerPath.isEmpty() && !providerKey.isEmpty() )
   {
     QgsDataProvider::ProviderOptions providerOptions { options.transformContext };
-    ok = setDataProvider( providerKey, providerOptions );
+    QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags();
+    if ( mReadFlags & QgsMapLayer::FlagTrustLayerMetadata )
+    {
+      flags |= QgsDataProvider::FlagTrustDataSource;
+    }
+    ok = setDataProvider( providerKey, providerOptions, flags );
   }
 
   if ( ok )
@@ -201,7 +207,7 @@ bool QgsMeshLayer::addDatasets( const QString &path, const QDateTime &defaultRef
       {
         QDateTime referenceTime = defaultReferenceTime;
         if ( !defaultReferenceTime.isValid() ) // If project reference time is invalid, use current date
-          referenceTime = QDateTime( QDate::currentDate(), QTime( 0, 0, 0, Qt::UTC ) );
+          referenceTime = QDateTime( QDate::currentDate(), QTime( 0, 0, 0, Qt::UTC ), Qt::UTC );
         temporalProperties->setReferenceTime( referenceTime, dataProvider()->temporalCapabilities() );
       }
 
@@ -519,6 +525,20 @@ QgsMeshDatasetIndex QgsMeshLayer::datasetIndexAtTime( const QgsDateTimeRange &ti
   return  mDatasetGroupStore->datasetIndexAtTime( startTime, datasetGroupIndex, mTemporalProperties->matchingMethod() );
 }
 
+QgsMeshDatasetIndex QgsMeshLayer::datasetIndexAtRelativeTime( const QgsInterval &relativeTime, int datasetGroupIndex ) const
+{
+  qint64 usedRelativeTime = relativeTime.seconds() * 1000;
+
+  //adjust relative time if layer reference time is different from provider reference time
+  if ( mTemporalProperties->referenceTime().isValid() &&
+       mDataProvider &&
+       mDataProvider->isValid() &&
+       mTemporalProperties->referenceTime() != mDataProvider->temporalCapabilities()->referenceTime() )
+    usedRelativeTime = usedRelativeTime + mTemporalProperties->referenceTime().msecsTo( mDataProvider->temporalCapabilities()->referenceTime() );
+
+  return  mDatasetGroupStore->datasetIndexAtTime( relativeTime.seconds() * 1000, datasetGroupIndex, mTemporalProperties->matchingMethod() );
+}
+
 void QgsMeshLayer::applyClassificationOnScalarSettings( const QgsMeshDatasetGroupMetadata &meta, QgsMeshRendererScalarSettings &scalarSettings ) const
 {
   if ( meta.extraOptions().contains( QStringLiteral( "classification" ) ) )
@@ -532,11 +552,11 @@ void QgsMeshLayer::applyClassificationOnScalarSettings( const QgsMeshDatasetGrou
       units = meta.extraOptions()[ QStringLiteral( "units" )];
 
     QVector<QVector<double>> bounds;
-    for ( const QString classe : classes )
+    for ( const QString &classe : classes )
     {
       QStringList boundsStr = classe.split( ',' );
       QVector<double> bound;
-      for ( const QString boundStr : boundsStr )
+      for ( const QString &boundStr : boundsStr )
         bound.append( boundStr.toDouble() );
       bounds.append( bound );
     }
@@ -693,8 +713,8 @@ QgsMeshDatasetIndex QgsMeshLayer::staticVectorDatasetIndex() const
 
 void QgsMeshLayer::setReferenceTime( const QDateTime &referenceTime )
 {
-  if ( dataProvider() )
-    mTemporalProperties->setReferenceTime( referenceTime, dataProvider()->temporalCapabilities() );
+  if ( auto *lDataProvider = dataProvider() )
+    mTemporalProperties->setReferenceTime( referenceTime, lDataProvider->temporalCapabilities() );
   else
     mTemporalProperties->setReferenceTime( referenceTime, nullptr );
 }
@@ -817,6 +837,11 @@ QgsInterval QgsMeshLayer::datasetRelativeTime( const QgsMeshDatasetIndex &index 
     return QgsInterval();
   else
     return QgsInterval( time, QgsUnitTypes::TemporalMilliseconds );
+}
+
+qint64 QgsMeshLayer::datasetRelativeTimeInMilliseconds( const QgsMeshDatasetIndex &index )
+{
+  return mDatasetGroupStore->datasetRelativeTime( index );
 }
 
 void QgsMeshLayer::updateActiveDatasetGroups()
@@ -1092,7 +1117,12 @@ bool QgsMeshLayer::readXml( const QDomNode &layer_node, QgsReadWriteContext &con
   }
 
   QgsDataProvider::ProviderOptions providerOptions;
-  if ( !setDataProvider( mProviderKey, providerOptions ) )
+  QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags();
+  if ( mReadFlags & QgsMapLayer::FlagTrustLayerMetadata )
+  {
+    flags |= QgsDataProvider::FlagTrustDataSource;
+  }
+  if ( !setDataProvider( mProviderKey, providerOptions, flags ) )
   {
     return false;
   }
@@ -1144,7 +1174,7 @@ bool QgsMeshLayer::readXml( const QDomNode &layer_node, QgsReadWriteContext &con
     mStaticVectorDatasetIndex = elemStaticDataset.attribute( QStringLiteral( "vector" ) ).toInt();
   }
 
-  return mValid; // should be true if read successfully
+  return isValid(); // should be true if read successfully
 }
 
 bool QgsMeshLayer::writeXml( QDomNode &layer_node, QDomDocument &document, const QgsReadWriteContext &context ) const
@@ -1222,22 +1252,124 @@ QStringList QgsMeshLayer::subLayers() const
     return QStringList();
 }
 
-bool QgsMeshLayer::isTemporary() const
+QString QgsMeshLayer::htmlMetadata() const
 {
-  if ( mDatasetGroupStore && mDatasetGroupStore->extraDatasetGroupCount() > 0 )
-    return true;
+  QgsLayerMetadataFormatter htmlFormatter( metadata() );
+  QString myMetadata = QStringLiteral( "<html>\n<body>\n" );
 
-  return false;
+  // Begin Provider section
+  myMetadata += QStringLiteral( "<h1>" ) + tr( "Information from provider" ) + QStringLiteral( "</h1>\n<hr>\n" );
+  myMetadata += QLatin1String( "<table class=\"list-view\">\n" );
+
+  // name
+  myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" ) + tr( "Name" ) + QStringLiteral( "</td><td>" ) + name() + QStringLiteral( "</td></tr>\n" );
+
+  // local path
+  QVariantMap uriComponents = QgsProviderRegistry::instance()->decodeUri( mProviderKey, publicSource() );
+  QString path;
+  if ( uriComponents.contains( QStringLiteral( "path" ) ) )
+  {
+    path = uriComponents[QStringLiteral( "path" )].toString();
+    if ( QFile::exists( path ) )
+      myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" ) + tr( "Path" ) + QStringLiteral( "</td><td>%1" ).arg( QStringLiteral( "<a href=\"%1\">%2</a>" ).arg( QUrl::fromLocalFile( path ).toString(), QDir::toNativeSeparators( path ) ) ) + QStringLiteral( "</td></tr>\n" );
+  }
+  if ( uriComponents.contains( QStringLiteral( "url" ) ) )
+  {
+    const QString url = uriComponents[QStringLiteral( "url" )].toString();
+    myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" ) + tr( "URL" ) + QStringLiteral( "</td><td>%1" ).arg( QStringLiteral( "<a href=\"%1\">%2</a>" ).arg( QUrl( url ).toString(), url ) ) + QStringLiteral( "</td></tr>\n" );
+  }
+
+  // data source
+  if ( publicSource() != path )
+    myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" ) + tr( "Source" ) + QStringLiteral( "</td><td>%1" ).arg( publicSource() ) + QStringLiteral( "</td></tr>\n" );
+
+  // EPSG
+  myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" ) + tr( "CRS" ) + QStringLiteral( "</td><td>" );
+  if ( crs().isValid() )
+  {
+    myMetadata += crs().userFriendlyIdentifier( QgsCoordinateReferenceSystem::FullString ) + QStringLiteral( " - " );
+    if ( crs().isGeographic() )
+      myMetadata += tr( "Geographic" );
+    else
+      myMetadata += tr( "Projected" );
+  }
+  myMetadata += QLatin1String( "</td></tr>\n" );
+
+  // Extent
+  myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" ) + tr( "Extent" ) + QStringLiteral( "</td><td>" ) + extent().toString() + QStringLiteral( "</td></tr>\n" );
+
+  // unit
+  myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" ) + tr( "Unit" ) + QStringLiteral( "</td><td>" ) + QgsUnitTypes::toString( crs().mapUnits() ) + QStringLiteral( "</td></tr>\n" );
+
+  // feature count
+  QLocale locale = QLocale();
+  locale.setNumberOptions( locale.numberOptions() &= ~QLocale::NumberOption::OmitGroupSeparator );
+
+  if ( dataProvider() )
+  {
+    myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" )
+                  + tr( "Vertex count" ) + QStringLiteral( "</td><td>" )
+                  + ( locale.toString( static_cast<qlonglong>( dataProvider()->vertexCount() ) ) )
+                  + QStringLiteral( "</td></tr>\n" );
+    myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" )
+                  + tr( "Face count" ) + QStringLiteral( "</td><td>" )
+                  + ( locale.toString( static_cast<qlonglong>( dataProvider()->faceCount() ) ) )
+                  + QStringLiteral( "</td></tr>\n" );
+    myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" )
+                  + tr( "Edge count" ) + QStringLiteral( "</td><td>" )
+                  + ( locale.toString( static_cast<qlonglong>( dataProvider()->edgeCount() ) ) )
+                  + QStringLiteral( "</td></tr>\n" );
+    myMetadata += QStringLiteral( "<tr><td class=\"highlight\">" )
+                  + tr( "Dataset groups count" ) + QStringLiteral( "</td><td>" )
+                  + ( locale.toString( static_cast<qlonglong>( dataProvider()->datasetGroupCount() ) ) )
+                  + QStringLiteral( "</td></tr>\n" );
+  }
+
+  // End Provider section
+  myMetadata += QLatin1String( "</table>\n<br><br>" );
+
+  // identification section
+  myMetadata += QStringLiteral( "<h1>" ) + tr( "Identification" ) + QStringLiteral( "</h1>\n<hr>\n" );
+  myMetadata += htmlFormatter.identificationSectionHtml( );
+  myMetadata += QLatin1String( "<br><br>\n" );
+
+  // extent section
+  myMetadata += QStringLiteral( "<h1>" ) + tr( "Extent" ) + QStringLiteral( "</h1>\n<hr>\n" );
+  myMetadata += htmlFormatter.extentSectionHtml( isSpatial() );
+  myMetadata += QLatin1String( "<br><br>\n" );
+
+  // Start the Access section
+  myMetadata += QStringLiteral( "<h1>" ) + tr( "Access" ) + QStringLiteral( "</h1>\n<hr>\n" );
+  myMetadata += htmlFormatter.accessSectionHtml( );
+  myMetadata += QLatin1String( "<br><br>\n" );
+
+  // Start the contacts section
+  myMetadata += QStringLiteral( "<h1>" ) + tr( "Contacts" ) + QStringLiteral( "</h1>\n<hr>\n" );
+  myMetadata += htmlFormatter.contactsSectionHtml( );
+  myMetadata += QLatin1String( "<br><br>\n" );
+
+  // Start the links section
+  myMetadata += QStringLiteral( "<h1>" ) + tr( "Links" ) + QStringLiteral( "</h1>\n<hr>\n" );
+  myMetadata += htmlFormatter.linksSectionHtml( );
+  myMetadata += QLatin1String( "<br><br>\n" );
+
+  // Start the history section
+  myMetadata += QStringLiteral( "<h1>" ) + tr( "History" ) + QStringLiteral( "</h1>\n<hr>\n" );
+  myMetadata += htmlFormatter.historySectionHtml( );
+  myMetadata += QLatin1String( "<br><br>\n" );
+
+  myMetadata += QLatin1String( "\n</body>\n</html>\n" );
+  return myMetadata;
 }
 
-bool QgsMeshLayer::setDataProvider( QString const &provider, const QgsDataProvider::ProviderOptions &options )
+bool QgsMeshLayer::setDataProvider( QString const &provider, const QgsDataProvider::ProviderOptions &options, QgsDataProvider::ReadFlags flags )
 {
   delete mDataProvider;
 
   mProviderKey = provider;
   QString dataSource = mDataSource;
 
-  mDataProvider = qobject_cast<QgsMeshDataProvider *>( QgsProviderRegistry::instance()->createProvider( provider, dataSource, options ) );
+  mDataProvider = qobject_cast<QgsMeshDataProvider *>( QgsProviderRegistry::instance()->createProvider( provider, dataSource, options, flags ) );
   if ( !mDataProvider )
   {
     QgsDebugMsgLevel( QStringLiteral( "Unable to get mesh data provider" ), 2 );
@@ -1247,8 +1379,8 @@ bool QgsMeshLayer::setDataProvider( QString const &provider, const QgsDataProvid
   mDataProvider->setParent( this );
   QgsDebugMsgLevel( QStringLiteral( "Instantiated the mesh data provider plugin" ), 2 );
 
-  mValid = mDataProvider->isValid();
-  if ( !mValid )
+  setValid( mDataProvider->isValid() );
+  if ( !isValid() )
   {
     QgsDebugMsgLevel( QStringLiteral( "Invalid mesh provider plugin %1" ).arg( QString( mDataSource.toUtf8() ) ), 2 );
     return false;
@@ -1256,7 +1388,7 @@ bool QgsMeshLayer::setDataProvider( QString const &provider, const QgsDataProvid
 
   setCrs( mDataProvider->crs() );
 
-  if ( provider == QStringLiteral( "mesh_memory" ) )
+  if ( provider == QLatin1String( "mesh_memory" ) )
   {
     // required so that source differs between memory layers
     mDataSource = mDataSource + QStringLiteral( "&uid=%1" ).arg( QUuid::createUuid().toString() );

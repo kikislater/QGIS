@@ -57,7 +57,6 @@ static void throwGEOSException( const char *fmt, ... )
   vsnprintf( buffer, sizeof buffer, fmt, ap );
   va_end( ap );
 
-  qWarning( "GEOS exception: %s", buffer );
   QString message = QString::fromUtf8( buffer );
 
 #ifdef _MSC_VER
@@ -90,8 +89,6 @@ static void printGEOSNotice( const char *fmt, ... )
   va_start( ap, fmt );
   vsnprintf( buffer, sizeof buffer, fmt, ap );
   va_end( ap );
-
-  QgsDebugMsg( QStringLiteral( "GEOS notice: %1" ).arg( QString::fromUtf8( buffer ) ) );
 #else
   Q_UNUSED( fmt )
 #endif
@@ -238,6 +235,7 @@ std::unique_ptr<QgsAbstractGeometry> QgsGeos::clip( const QgsRectangle &rect, QS
   }
   catch ( GEOSException &e )
   {
+    logError( QStringLiteral( "GEOS" ), e.what() );
     if ( errorMsg )
     {
       *errorMsg = e.what();
@@ -545,6 +543,7 @@ QString QgsGeos::relate( const QgsAbstractGeometry *geom, QString *errorMsg ) co
   }
   catch ( GEOSException &e )
   {
+    logError( QStringLiteral( "GEOS" ), e.what() );
     if ( errorMsg )
     {
       *errorMsg = e.what();
@@ -574,6 +573,7 @@ bool QgsGeos::relatePattern( const QgsAbstractGeometry *geom, const QString &pat
   }
   catch ( GEOSException &e )
   {
+    logError( QStringLiteral( "GEOS" ), e.what() );
     if ( errorMsg )
     {
       *errorMsg = e.what();
@@ -620,7 +620,7 @@ QgsGeometryEngine::EngineOperationResult QgsGeos::splitGeometry( const QgsLineSt
     QVector<QgsGeometry> &newGeometries,
     bool topological,
     QgsPointSequence &topologyTestPoints,
-    QString *errorMsg ) const
+    QString *errorMsg, bool skipIntersectionCheck ) const
 {
 
   EngineOperationResult returnCode = Success;
@@ -678,11 +678,11 @@ QgsGeometryEngine::EngineOperationResult QgsGeos::splitGeometry( const QgsLineSt
     //call split function depending on geometry type
     if ( mGeometry->dimension() == 1 )
     {
-      returnCode = splitLinearGeometry( splitLineGeos.get(), newGeometries );
+      returnCode = splitLinearGeometry( splitLineGeos.get(), newGeometries, skipIntersectionCheck );
     }
     else if ( mGeometry->dimension() == 2 )
     {
-      returnCode = splitPolygonGeometry( splitLineGeos.get(), newGeometries );
+      returnCode = splitPolygonGeometry( splitLineGeos.get(), newGeometries, skipIntersectionCheck );
     }
     else
     {
@@ -817,7 +817,7 @@ geos::unique_ptr QgsGeos::linePointDifference( GEOSGeometry *GEOSsplitPoint ) co
   return asGeos( &lines, mPrecision );
 }
 
-QgsGeometryEngine::EngineOperationResult QgsGeos::splitLinearGeometry( GEOSGeometry *splitLine, QVector<QgsGeometry> &newGeometries ) const
+QgsGeometryEngine::EngineOperationResult QgsGeos::splitLinearGeometry( GEOSGeometry *splitLine, QVector<QgsGeometry> &newGeometries, bool skipIntersectionCheck ) const
 {
   if ( !splitLine )
     return InvalidInput;
@@ -826,7 +826,7 @@ QgsGeometryEngine::EngineOperationResult QgsGeos::splitLinearGeometry( GEOSGeome
     return InvalidBaseGeometry;
 
   //first test if linestring intersects geometry. If not, return straight away
-  if ( !GEOSIntersects_r( geosinit()->ctxt, splitLine, mGeos.get() ) )
+  if ( !skipIntersectionCheck && !GEOSIntersects_r( geosinit()->ctxt, splitLine, mGeos.get() ) )
     return NothingHappened;
 
   //check that split line has no linear intersection
@@ -872,7 +872,7 @@ QgsGeometryEngine::EngineOperationResult QgsGeos::splitLinearGeometry( GEOSGeome
   return Success;
 }
 
-QgsGeometryEngine::EngineOperationResult QgsGeos::splitPolygonGeometry( GEOSGeometry *splitLine, QVector<QgsGeometry> &newGeometries ) const
+QgsGeometryEngine::EngineOperationResult QgsGeos::splitPolygonGeometry( GEOSGeometry *splitLine, QVector<QgsGeometry> &newGeometries, bool skipIntersectionCheck ) const
 {
   if ( !splitLine )
     return InvalidInput;
@@ -886,7 +886,7 @@ QgsGeometryEngine::EngineOperationResult QgsGeos::splitPolygonGeometry( GEOSGeom
     return EngineError;
 
   //first test if linestring intersects geometry. If not, return straight away
-  if ( !GEOSPreparedIntersects_r( geosinit()->ctxt, mGeosPrepared.get(), splitLine ) )
+  if ( !skipIntersectionCheck && !GEOSPreparedIntersects_r( geosinit()->ctxt, mGeosPrepared.get(), splitLine ) )
     return NothingHappened;
 
   //first union all the polygon rings together (to get them noded, see JTS developer guide)
@@ -1055,8 +1055,18 @@ geos::unique_ptr QgsGeos::createGeosCollection( int typeId, const QVector<GEOSGe
   {
     if ( *geomIt )
     {
-      geomarr[i] = *geomIt;
-      ++i;
+      if ( GEOSisEmpty_r( geosinit()->ctxt, *geomIt ) )
+      {
+        // don't add empty parts to a geos collection, it can cause crashes in GEOS
+        nNullGeoms++;
+        nNotNullGeoms--;
+        GEOSGeom_destroy_r( geosinit()->ctxt, *geomIt );
+      }
+      else
+      {
+        geomarr[i] = *geomIt;
+        ++i;
+      }
     }
   }
   geos::unique_ptr geom;
@@ -1436,6 +1446,7 @@ std::unique_ptr<QgsAbstractGeometry> QgsGeos::overlay( const QgsAbstractGeometry
   }
   catch ( GEOSException &e )
   {
+    logError( QStringLiteral( "GEOS" ), e.what() );
     if ( errorMsg )
     {
       *errorMsg = e.what();
@@ -1520,6 +1531,7 @@ bool QgsGeos::relation( const QgsAbstractGeometry *geom, Relation r, QString *er
   }
   catch ( GEOSException &e )
   {
+    logError( QStringLiteral( "GEOS" ), e.what() );
     if ( errorMsg )
     {
       *errorMsg = e.what();
@@ -2231,6 +2243,7 @@ QgsGeometry QgsGeos::closestPoint( const QgsGeometry &other, QString *errorMsg )
   }
   catch ( GEOSException &e )
   {
+    logError( QStringLiteral( "GEOS" ), e.what() );
     if ( errorMsg )
     {
       *errorMsg = e.what();
@@ -2269,6 +2282,7 @@ QgsGeometry QgsGeos::shortestLine( const QgsGeometry &other, QString *errorMsg )
   }
   catch ( GEOSException &e )
   {
+    logError( QStringLiteral( "GEOS" ), e.what() );
     if ( errorMsg )
     {
       *errorMsg = e.what();
@@ -2302,6 +2316,7 @@ double QgsGeos::lineLocatePoint( const QgsPoint &point, QString *errorMsg ) cons
   }
   catch ( GEOSException &e )
   {
+    logError( QStringLiteral( "GEOS" ), e.what() );
     if ( errorMsg )
     {
       *errorMsg = e.what();

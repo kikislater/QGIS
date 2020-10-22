@@ -288,6 +288,52 @@ class CORE_EXPORT QgsSimpleLineSymbolLayer : public QgsLineSymbolLayer
      */
     void setDrawInsidePolygon( bool drawInsidePolygon ) { mDrawInsidePolygon = drawInsidePolygon; }
 
+    /**
+     * Returns TRUE if dash patterns should be aligned to the start and end of lines, by
+     * applying subtle tweaks to the pattern sizing in order to ensure that the end of
+     * a line is represented by a complete dash element.
+     *
+     * \see setAlignDashPattern()
+     * \see tweakDashPatternOnCorners()
+     * \since QGIS 3.16
+     */
+    bool alignDashPattern() const;
+
+    /**
+     * Sets whether dash patterns should be aligned to the start and end of lines, by
+     * applying subtle tweaks to the pattern sizing in order to ensure that the end of
+     * a line is represented by a complete dash element.
+     *
+     * \see alignDashPattern()
+     * \see setTweakDashPatternOnCorners()
+     * \since QGIS 3.16
+     */
+    void setAlignDashPattern( bool enabled );
+
+    /**
+     * Returns TRUE if dash patterns tweaks should be applied on sharp corners, to ensure
+     * that a double-length dash is drawn running into and out of the corner.
+     *
+     * \note This setting is only applied if alignDashPattern() is TRUE.
+     *
+     * \see setTweakDashPatternOnCorners()
+     * \see alignDashPattern()
+     * \since QGIS 3.16
+     */
+    bool tweakDashPatternOnCorners() const;
+
+    /**
+     * Sets whether dash patterns tweaks should be applied on sharp corners, to ensure
+     * that a double-length dash is drawn running into and out of the corner.
+     *
+     * \note This setting is only applied if alignDashPattern() is TRUE.
+     *
+     * \see tweakDashPatternOnCorners()
+     * \see setAlignDashPattern()
+     * \since QGIS 3.16
+     */
+    void setTweakDashPatternOnCorners( bool enabled );
+
   private:
 
     Qt::PenStyle mPenStyle = Qt::SolidLine;
@@ -307,10 +353,14 @@ class CORE_EXPORT QgsSimpleLineSymbolLayer : public QgsLineSymbolLayer
     //! Vector with an even number of entries for the
     QVector<qreal> mCustomDashVector;
 
+    bool mAlignDashPattern = false;
+    bool mPatternCartographicTweakOnSharpCorners = false;
+
     bool mDrawInsidePolygon = false;
 
     //helper functions for data defined symbology
     void applyDataDefinedSymbology( QgsSymbolRenderContext &context, QPen &pen, QPen &selPen, double &offset );
+    void drawPathWithDashPatternTweaks( QPainter *painter, const QPolygonF &points, QPen pen ) const;
 };
 
 /////////
@@ -578,7 +628,7 @@ class CORE_EXPORT QgsTemplatedLineSymbolLayerBase : public QgsLineSymbolLayer
      * in the \a layer argument. A \a layer of -1 indicates that all symbol layers should be
      * rendered.
      *
-     * If \a selected is true then the symbol will be drawn using the "selected feature"
+     * If \a selected is TRUE then the symbol will be drawn using the "selected feature"
      * style and colors instead of the symbol's normal style.
      */
     virtual void renderSymbol( const QPointF &point, const QgsFeature *feature, QgsRenderContext &context, int layer = -1, bool selected = false ) = 0;

@@ -20,8 +20,9 @@
 #include "qgsmeshdataprovidertemporalcapabilities.h"
 #include "qgsrectangle.h"
 
-QgsMeshDataProvider::QgsMeshDataProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options )
-  : QgsDataProvider( uri, options )
+QgsMeshDataProvider::QgsMeshDataProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options,
+    QgsDataProvider::ReadFlags flags )
+  : QgsDataProvider( uri, options, flags )
 {
 }
 
@@ -129,6 +130,26 @@ void QgsMesh::clear()
   vertices.clear();
   edges.clear();
   faces.clear();
+}
+
+bool QgsMesh::compareFaces( const QgsMeshFace &face1, const QgsMeshFace &face2 )
+{
+  if ( face1.count() != face2.count() )
+    return false;
+
+  int startFace2 = 0;
+  for ( int i = 0; i < face2.count(); ++i )
+    if ( face2.at( i ) == face1.at( 0 ) )
+    {
+      startFace2 = i;
+      break;
+    }
+
+  for ( int i = 0; i < face1.count(); ++i )
+    if ( face1.at( i ) != face2.at( ( i + startFace2 ) % ( face2.count() ) ) )
+      return false;
+
+  return true;
 }
 
 bool QgsMesh::contains( const QgsMesh::ElementType &type ) const

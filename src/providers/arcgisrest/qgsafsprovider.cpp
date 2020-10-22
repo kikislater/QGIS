@@ -29,8 +29,8 @@ const QString QgsAfsProvider::AFS_PROVIDER_KEY = QStringLiteral( "arcgisfeatures
 const QString QgsAfsProvider::AFS_PROVIDER_DESCRIPTION = QStringLiteral( "ArcGIS Feature Service data provider" );
 
 
-QgsAfsProvider::QgsAfsProvider( const QString &uri, const ProviderOptions &options )
-  : QgsVectorDataProvider( uri, options )
+QgsAfsProvider::QgsAfsProvider( const QString &uri, const ProviderOptions &options, QgsDataProvider::ReadFlags flags )
+  : QgsVectorDataProvider( uri, options, flags )
 {
   mSharedData.reset( new QgsAfsSharedData() );
   mSharedData->mGeometryType = QgsWkbTypes::Unknown;
@@ -158,7 +158,7 @@ QgsAfsProvider::QgsAfsProvider( const QString &uri, const ProviderOptions &optio
     if ( !fieldAlias.isEmpty() && fieldAlias != fieldName )
       field.setAlias( fieldAlias );
 
-    if ( fieldDataMap.contains( QStringLiteral( "domain" ) ) && fieldDataMap.value( QStringLiteral( "domain" ) ).toMap().value( QStringLiteral( "type" ) ).toString() == QStringLiteral( "codedValue" ) )
+    if ( fieldDataMap.contains( QStringLiteral( "domain" ) ) && fieldDataMap.value( QStringLiteral( "domain" ) ).toMap().value( QStringLiteral( "type" ) ).toString() == QLatin1String( "codedValue" ) )
     {
       const QVariantList values = fieldDataMap.value( QStringLiteral( "domain" ) ).toMap().value( QStringLiteral( "codedValues" ) ).toList();
       QVariantList valueConfig;
@@ -462,9 +462,9 @@ QString QgsAfsProviderMetadata::encodeUri( const QVariantMap &parts )
   return dsUri.uri();
 }
 
-QgsAfsProvider *QgsAfsProviderMetadata::createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options )
+QgsAfsProvider *QgsAfsProviderMetadata::createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options, QgsDataProvider::ReadFlags flags )
 {
-  return new QgsAfsProvider( uri, options );
+  return new QgsAfsProvider( uri, options, flags );
 }
 
 

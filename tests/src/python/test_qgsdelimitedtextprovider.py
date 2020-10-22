@@ -29,7 +29,8 @@ import tempfile
 import inspect
 import time
 import test_qgsdelimitedtextprovider_wanted as want  # NOQA
-import collections
+
+from collections.abc import Callable
 
 rebuildTests = 'REBUILD_DELIMITED_TEXT_TESTS' in os.environ
 
@@ -63,7 +64,7 @@ try:
     class MyUrl:
 
         def __init__(self, url):
-            self.url = QUrl(url)
+            self.url = url
             self.query = QUrlQuery()
 
         @classmethod
@@ -127,29 +128,6 @@ class MessageLogger(QObject):
 
     def messages(self):
         return self.log
-
-
-class TestQgsDelimitedTextProviderLoading(unittest.TestCase):
-
-    def test_open_filepath_with_file_prefix(self):
-        srcpath = os.path.join(TEST_DATA_DIR, 'provider')
-        basetestfile = os.path.join(srcpath, 'delimited_xy.csv')
-
-        url = MyUrl.fromLocalFile(basetestfile)
-        url.addQueryItem("type", "csv")
-
-        vl = QgsVectorLayer(url.toString(), 'test', 'delimitedtext')
-        assert vl.isValid(), "{} is invalid".format(basetestfile)
-
-    def test_treat_open_filepath_without_file_prefix(self):
-        srcpath = os.path.join(TEST_DATA_DIR, 'provider')
-        basetestfile = os.path.join(srcpath, 'delimited_xy.csv')
-
-        url = MyUrl(basetestfile)
-        url.addQueryItem("type", "csv")
-
-        vl = QgsVectorLayer(url.toString(), 'test', 'delimitedtext')
-        assert vl.isValid(), "{} is invalid".format(basetestfile)
 
 
 class TestQgsDelimitedTextProviderXY(unittest.TestCase, ProviderTestCase):
@@ -328,11 +306,11 @@ class TestQgsDelimitedTextProviderOther(unittest.TestCase):
                 for nr, r in enumerate(requests):
                     if verbose:
                         print(("Processing request", nr + 1, repr(r)))
-                    if isinstance(r, collections.Callable):
+                    if isinstance(r, Callable):
                         r(layer)
                         if verbose:
                             print("Request function executed")
-                    if isinstance(r, collections.Callable):
+                    if isinstance(r, Callable):
                         continue
                     rfields, rtypes, rdata = self.layerData(layer, r, nr * 1000)
                     if len(rfields) > len(fields):
@@ -949,6 +927,7 @@ class TestQgsDelimitedTextProviderOther(unittest.TestCase):
         assert vl.fields().at(4).type() == QVariant.DateTime
         assert vl.fields().at(5).type() == QVariant.Date
         assert vl.fields().at(6).type() == QVariant.Time
+        assert vl.fields().at(9).type() == QVariant.String
 
     def testSpatialIndex(self):
         srcpath = os.path.join(TEST_DATA_DIR, 'provider')

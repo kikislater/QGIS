@@ -102,6 +102,12 @@ struct CORE_EXPORT QgsMesh
     */
   void clear();
 
+  /**
+   * Compare two faces, return TRUE if they are equivalent : same indexes and same clock wise
+    * \since QGIS 3.16
+   */
+  static bool compareFaces( const QgsMeshFace &face1, const QgsMeshFace &face2 );
+
   QVector<QgsMeshVertex> vertices SIP_SKIP;
   QVector<QgsMeshEdge> edges SIP_SKIP;
   QVector<QgsMeshFace> faces SIP_SKIP;
@@ -393,7 +399,9 @@ class CORE_EXPORT QgsMeshDataProvider: public QgsDataProvider, public QgsMeshDat
     Q_OBJECT
   public:
     //! Ctor
-    QgsMeshDataProvider( const QString &uri, const QgsDataProvider::ProviderOptions &providerOptions );
+    QgsMeshDataProvider( const QString &uri,
+                         const QgsDataProvider::ProviderOptions &providerOptions,
+                         QgsDataProvider::ReadFlags flags = QgsDataProvider::ReadFlags() );
 
     QgsMeshDataProviderTemporalCapabilities *temporalCapabilities() override;
     const QgsMeshDataProviderTemporalCapabilities *temporalCapabilities() const override SIP_SKIP;

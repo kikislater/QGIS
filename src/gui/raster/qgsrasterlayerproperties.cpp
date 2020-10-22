@@ -60,6 +60,7 @@
 #include "qgsprovidermetadata.h"
 #include "qgsproviderregistry.h"
 #include "qgsrasterlayertemporalproperties.h"
+#include "qgsdoublevalidator.h"
 
 #include "qgsrasterlayertemporalpropertieswidget.h"
 #include "qgsprojecttimesettings.h"
@@ -159,21 +160,26 @@ QgsRasterLayerProperties::QgsRasterLayerProperties( QgsMapLayer *lyr, QgsMapCanv
   // brightness/contrast controls
   connect( mSliderBrightness, &QAbstractSlider::valueChanged, mBrightnessSpinBox, &QSpinBox::setValue );
   connect( mBrightnessSpinBox, static_cast < void ( QSpinBox::* )( int ) > ( &QSpinBox::valueChanged ), mSliderBrightness, &QAbstractSlider::setValue );
+  mBrightnessSpinBox->setClearValue( 0 );
 
   connect( mSliderContrast, &QAbstractSlider::valueChanged, mContrastSpinBox, &QSpinBox::setValue );
   connect( mContrastSpinBox, static_cast < void ( QSpinBox::* )( int ) > ( &QSpinBox::valueChanged ), mSliderContrast, &QAbstractSlider::setValue );
+  mContrastSpinBox->setClearValue( 0 );
 
   // gamma correction controls
   connect( mSliderGamma, &QAbstractSlider::valueChanged, this, &QgsRasterLayerProperties::updateGammaSpinBox );
   connect( mGammaSpinBox, static_cast < void ( QDoubleSpinBox::* )( double ) > ( &QDoubleSpinBox::valueChanged ), this, &QgsRasterLayerProperties::updateGammaSlider );
+  mGammaSpinBox->setClearValue( 1.0 );
 
   // Connect saturation slider and spin box
   connect( sliderSaturation, &QAbstractSlider::valueChanged, spinBoxSaturation, &QSpinBox::setValue );
   connect( spinBoxSaturation, static_cast < void ( QSpinBox::* )( int ) > ( &QSpinBox::valueChanged ), sliderSaturation, &QAbstractSlider::setValue );
+  spinBoxSaturation->setClearValue( 0 );
 
   // Connect colorize strength slider and spin box
   connect( sliderColorizeStrength, &QAbstractSlider::valueChanged, spinColorizeStrength, &QSpinBox::setValue );
   connect( spinColorizeStrength, static_cast < void ( QSpinBox::* )( int ) > ( &QSpinBox::valueChanged ), sliderColorizeStrength, &QAbstractSlider::setValue );
+  spinColorizeStrength->setClearValue( 100 );
 
   // enable or disable saturation slider and spin box depending on grayscale combo choice
   connect( comboGrayscale, static_cast<void ( QComboBox::* )( int )>( &QComboBox::currentIndexChanged ), this, &QgsRasterLayerProperties::toggleSaturationControls );
@@ -191,7 +197,7 @@ QgsRasterLayerProperties::QgsRasterLayerProperties( QgsMapLayer *lyr, QgsMapCanv
   chkUseScaleDependentRendering->setChecked( lyr->hasScaleBasedVisibility() );
   mScaleRangeWidget->setScaleRange( lyr->minimumScale(), lyr->maximumScale() );
 
-  leNoDataValue->setValidator( new QDoubleValidator( -std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), 1000, this ) );
+  leNoDataValue->setValidator( new QgsDoubleValidator( -std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), 1000, this ) );
 
   // build GUI components
   QIcon myPyramidPixmap( QgsApplication::getThemeIcon( "/mIconPyramid.svg" ) );
@@ -281,7 +287,7 @@ QgsRasterLayerProperties::QgsRasterLayerProperties( QgsMapLayer *lyr, QgsMapCanv
   }
 
   QVBoxLayout *layout = new QVBoxLayout( metadataFrame );
-  layout->setMargin( 0 );
+  layout->setContentsMargins( 0, 0, 0, 0 );
   mMetadataWidget = new QgsMetadataWidget( this, mRasterLayer );
   mMetadataWidget->layout()->setContentsMargins( 0, 0, 0, 0 );
   mMetadataWidget->setMapCanvas( mMapCanvas );
@@ -464,7 +470,7 @@ QgsRasterLayerProperties::QgsRasterLayerProperties( QgsMapLayer *lyr, QgsMapCanv
       mBandRenderingGrpBx->updateGeometry();
     }
 
-    if ( mRasterLayer->providerType() != QStringLiteral( "wms" ) )
+    if ( mRasterLayer->providerType() != QLatin1String( "wms" ) )
     {
       mWMSPrintGroupBox->hide();
       mPublishDataSourceUrlCheckBox->hide();
@@ -769,6 +775,24 @@ void QgsRasterLayerProperties::sync()
     mGammaSpinBox->setValue( brightnessFilter->gamma() );
   }
 
+  // Hue and saturation color control
+  const QgsHueSaturationFilter *hueSaturationFilter = mRasterLayer->hueSaturationFilter();
+  //set hue and saturation controls to current values
+  if ( hueSaturationFilter )
+  {
+    sliderSaturation->setValue( hueSaturationFilter->saturation() );
+    comboGrayscale->setCurrentIndex( ( int ) hueSaturationFilter->grayscaleMode() );
+
+    // Set state of saturation controls based on grayscale mode choice
+    toggleSaturationControls( static_cast<int>( hueSaturationFilter->grayscaleMode() ) );
+
+    // Set state of colorize controls
+    mColorizeCheck->setChecked( hueSaturationFilter->colorizeOn() );
+    btnColorizeColor->setColor( hueSaturationFilter->colorizeColor() );
+    toggleColorizeControls( hueSaturationFilter->colorizeOn() );
+    sliderColorizeStrength->setValue( hueSaturationFilter->colorizeStrength() );
+  }
+
   /*
    * Transparent Pixel Tab
    */
@@ -786,7 +810,8 @@ void QgsRasterLayerProperties::sync()
   // TODO: no data ranges
   if ( provider->sourceHasNoDataValue( 1 ) )
   {
-    lblSrcNoDataValue->setText( QgsRasterBlock::printValue( provider->sourceNoDataValue( 1 ) ) );
+    double v = QgsRasterBlock::printValue( provider->sourceNoDataValue( 1 ) ).toDouble();
+    lblSrcNoDataValue->setText( QLocale().toString( v, 'g' ) );
   }
   else
   {
@@ -849,7 +874,7 @@ void QgsRasterLayerProperties::sync()
   pixmapPalette->repaint();
 #endif
 
-  QgsDebugMsg( QStringLiteral( "populate metadata tab" ) );
+  QgsDebugMsgLevel( QStringLiteral( "populate metadata tab" ), 2 );
   /*
    * Metadata Tab
    */
@@ -943,7 +968,7 @@ void QgsRasterLayerProperties::apply()
   if ( "" != leNoDataValue->text() )
   {
     bool myDoubleOk = false;
-    double myNoDataValue = leNoDataValue->text().toDouble( &myDoubleOk );
+    double myNoDataValue = QgsDoubleValidator::toDouble( leNoDataValue->text(), &myDoubleOk );
     if ( myDoubleOk )
     {
       QgsRasterRange myNoDataRange( myNoDataValue, myNoDataValue );
@@ -1604,17 +1629,18 @@ void QgsRasterLayerProperties::setTransparencyCell( int row, int column, double 
     {
       case Qgis::Float32:
       case Qgis::Float64:
-        lineEdit->setValidator( new QDoubleValidator( nullptr ) );
+        lineEdit->setValidator( new QgsDoubleValidator( nullptr ) );
         if ( !std::isnan( value ) )
         {
-          valueString = QgsRasterBlock::printValue( value );
+          double v = QgsRasterBlock::printValue( value ).toDouble();
+          valueString = QLocale().toString( v, 'g' ) ;
         }
         break;
       default:
         lineEdit->setValidator( new QIntValidator( nullptr ) );
         if ( !std::isnan( value ) )
         {
-          valueString = QString::number( static_cast<int>( value ) );
+          valueString = QLocale().toString( static_cast<int>( value ) );
         }
         break;
     }
@@ -1634,7 +1660,8 @@ void QgsRasterLayerProperties::setTransparencyCellValue( int row, int column, do
 {
   QLineEdit *lineEdit = dynamic_cast<QLineEdit *>( tableTransparency->cellWidget( row, column ) );
   if ( !lineEdit ) return;
-  lineEdit->setText( QgsRasterBlock::printValue( value ) );
+  double v = QgsRasterBlock::printValue( value ).toDouble();
+  lineEdit->setText( QLocale().toString( v, 'g' ) );
   lineEdit->adjustSize();
   adjustTransparencyCellWidth( row, column );
   tableTransparency->resizeColumnsToContents();
@@ -2333,7 +2360,7 @@ void QgsRasterLayerProperties::updateInformationContent()
 {
   const QString myStyle = QgsApplication::reportStyleSheet( QgsApplication::StyleSheetType::WebBrowser );
   // Inject the stylesheet
-  const QString html { mRasterLayer->htmlMetadata().replace( QStringLiteral( "<head>" ), QStringLiteral( R"raw(<head><style type="text/css">%1</style>)raw" ) ).arg( myStyle ) };
+  const QString html { mRasterLayer->htmlMetadata().replace( QLatin1String( "<head>" ), QStringLiteral( R"raw(<head><style type="text/css">%1</style>)raw" ) ).arg( myStyle ) };
   mMetadataViewer->setHtml( html );
   mMetadataFilled = true;
 }
