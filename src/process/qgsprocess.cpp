@@ -122,7 +122,7 @@ std::unique_ptr< QgsPythonUtils > QgsProcessingExec::loadPythonSupport()
     pythonlib.setFileName( pythonlibName );
     if ( !pythonlib.load() )
     {
-      std::cerr << QStringLiteral( "Couldn't load Python support library: %1" ).arg( pythonlib.errorString() ).toLocal8Bit().constData();
+      std::cerr << QStringLiteral( "Couldn't load Python support library: %1\n" ).arg( pythonlib.errorString() ).toLocal8Bit().constData();
       return nullptr;
     }
   }
@@ -132,7 +132,7 @@ std::unique_ptr< QgsPythonUtils > QgsProcessingExec::loadPythonSupport()
   if ( !pythonlib_inst )
   {
     //using stderr on purpose because we want end users to see this [TS]
-    std::cerr << "Couldn't resolve python support library's instance() symbol.";
+    std::cerr << "Couldn't resolve Python support library's instance() symbol.\n";
     return nullptr;
   }
 
@@ -158,7 +158,7 @@ int QgsProcessingExec::run( const QStringList &args )
     if ( level == Qgis::Critical )
     {
       if ( !message.contains( QLatin1String( "DeprecationWarning:" ) ) )
-        std::cerr << message.toLocal8Bit().constData();
+        std::cerr << message.toLocal8Bit().constData() << '\n';
     }
   } );
 
@@ -440,13 +440,17 @@ int QgsProcessingExec::execute( const QString &id, const QVariantMap &params )
     std::cout << it.key().toLocal8Bit().constData() << ":\t" << it.value().toString().toLocal8Bit().constData() << '\n';
   }
 
+  QgsProcessingContext context;
   const QgsProcessingParameterDefinitions defs = alg->parameterDefinitions();
   QList< const QgsProcessingParameterDefinition * > missingParams;
   for ( const QgsProcessingParameterDefinition *p : defs )
   {
-    if ( !( p->flags() & QgsProcessingParameterDefinition::FlagOptional ) && !params.contains( p->name() ) )
+    if ( !p->checkValueIsAcceptable( params.value( p->name() ), &context ) )
     {
-      missingParams << p;
+      if ( !( p->flags() & QgsProcessingParameterDefinition::FlagOptional ) && !params.contains( p->name() ) )
+      {
+        missingParams << p;
+      }
     }
   }
 
@@ -461,7 +465,14 @@ int QgsProcessingExec::execute( const QString &id, const QVariantMap &params )
     return 1;
   }
 
-  QgsProcessingContext context;
+  QString message;
+  if ( !alg->checkParameterValues( params, context, &message ) )
+  {
+    std::cerr << QStringLiteral( "ERROR:\tAn error was encountered while checking parameter values\n" ).toLocal8Bit().constData();
+    std::cerr << QStringLiteral( "\t%1\n" ).arg( message ).toLocal8Bit().constData();
+    return 1;
+  }
+
   ConsoleFeedback feedback;
 
 #if defined(Q_OS_UNIX) && !defined(Q_OS_ANDROID)

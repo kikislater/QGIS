@@ -358,7 +358,7 @@ class CORE_EXPORT QgsPalLayerSettings
       AutoWrapLength = 101,
       MultiLineHeight = 32,
       MultiLineAlignment = 33,
-      TextOrientation = 104,
+      TextOrientation = 110,
       DirSymbDraw = 34,
       DirSymbLeft = 35,
       DirSymbRight = 36,
@@ -1264,10 +1264,10 @@ class CORE_EXPORT QgsPalLabeling
   public:
 
     /**
-     * called to find out whether the layer is used for labeling
+     * Called to find out whether a specified \a layer is used for labeling.
      * \since QGIS 2.4
      */
-    static bool staticWillUseLayer( QgsVectorLayer *layer );
+    static bool staticWillUseLayer( const QgsMapLayer *layer );
 
     //! \note not available in Python bindings
     static void drawLabelCandidateRect( pal::LabelPosition *lp, QPainter *painter, const QgsMapToPixel *xform, QList<QgsLabelCandidate> *candidates = nullptr ) SIP_SKIP;

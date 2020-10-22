@@ -47,6 +47,9 @@ QgsFilteredSelectionManager::QgsFilteredSelectionManager( QgsVectorLayer *layer,
   : QgsVectorLayerSelectionManager( layer, parent )
   , mRequest( request )
 {
+  if ( ! layer )
+    return;
+
   for ( auto fid : layer->selectedFeatureIds() )
     if ( mRequest.acceptFeature( layer->getFeature( fid ) ) )
       mSelectedFeatureIds << fid;
@@ -435,8 +438,8 @@ void QgsRelationEditorWidget::updateButtons()
       ||
       (
         mRelation.isValid() &&
-        mRelation.referencedLayer()->geometryType() != QgsWkbTypes::NullGeometry &&
-        mRelation.referencedLayer()->geometryType() != QgsWkbTypes::UnknownGeometry
+        mRelation.referencingLayer()->geometryType() != QgsWkbTypes::NullGeometry &&
+        mRelation.referencingLayer()->geometryType() != QgsWkbTypes::UnknownGeometry
       )
     )
   );
@@ -872,6 +875,8 @@ void QgsRelationEditorWidget::toggleEditing( bool state )
     if ( mNmRelation.isValid() )
       mEditorContext.vectorLayerTools()->stopEditing( mNmRelation.referencedLayer() );
   }
+
+  updateButtons();
 }
 
 void QgsRelationEditorWidget::saveEdits()
@@ -920,7 +925,7 @@ void QgsRelationEditorWidget::updateUi()
 
       initDualView( mNmRelation.referencedLayer(), nmRequest );
     }
-    else
+    else if ( mRelation.referencingLayer() )
     {
       initDualView( mRelation.referencingLayer(), myRequest );
     }
